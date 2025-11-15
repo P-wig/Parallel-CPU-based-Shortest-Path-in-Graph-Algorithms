@@ -1,0 +1,59 @@
+# C++ build artifacts
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.out
+*.a
+*.lib
+
+# CMake build folders
+/build/
+[Cc]MakeCache.txt
+[Cc]MakeFiles/
+cmake_install.cmake
+Makefile
+
+# Visual Studio files
+*.vcxproj*
+*.sln
+*.user
+*.opensdf
+*.sdf
+*.ipch
+*.pdb
+
+# CLion/JetBrains IDE
+.idea/
+cmake-build-*/
+
+# VSCode
+.vscode/
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Latex build files
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+
+# Backup files
+*~
+*.bak
+*.swp
+
+# Other
+*.tmp
