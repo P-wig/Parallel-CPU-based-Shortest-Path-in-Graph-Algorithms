@@ -1,0 +1,30 @@
+#!/bin/bash
+#SBATCH -A SEE22001         # account name
+#SBATCH -J p3_collatz       # job name
+#SBATCH -o p3_collatz.%j    # name of the output and error file
+#SBATCH -N 1                # total number of nodes requested
+#SBATCH -n 1                # total number of tasks requested
+#SBATCH -p small            # queue name
+#SBATCH -t 00:02:00         # expected maximum runtime (hh:mm:ss)
+
+date
+
+./collatz_pthread 7 400000000 1
+./collatz_pthread 7 400000000 4
+./collatz_pthread 7 400000000 8
+./collatz_pthread 7 400000000 12
+./collatz_pthread 7 400000000 16
+./collatz_pthread 7 400000000 20
+./collatz_pthread 7 400000000 24
+./collatz_pthread 7 400000000 28
+./collatz_pthread 7 400000000 32
+./collatz_pthread 7 400000000 36
+./collatz_pthread 7 400000000 40
+./collatz_pthread 7 400000000 44
+./collatz_pthread 7 400000000 48
+./collatz_pthread 7 400000000 52
+./collatz_pthread 7 400000000 56
+./collatz_pthread 7 400000000 60
+./collatz_pthread 7 400000000 64
+
+date
