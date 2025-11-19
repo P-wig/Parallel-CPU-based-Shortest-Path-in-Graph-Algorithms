@@ -1,3 +1,6 @@
+//compile: g++ -std=c++17 -O2 -I. -o benchmark/benchmark benchmark/benchmark.cpp
+//run: ./benchmark/benchmark internet.egr sssp_results.txt
+
 #include <iostream>
 #include <fstream>
 #include <cstdlib>
@@ -56,7 +59,8 @@ int main(int argc, char* argv[]) {
         exit(-1);
     }
 
-    const char* output_file = (argc == 3) ? argv[2] : "sssp_results.txt";
+    // Set output file path to always be in benchmark directory
+    std::string output_file = (argc == 3) ? std::string("benchmark/") + argv[2] : "benchmark/sssp_results.txt";
 
     // Read input
     ECLgraph g = readECLgraph(argv[1]);
@@ -88,9 +92,8 @@ int main(int argc, char* argv[]) {
     std::chrono::duration<double> runtime = end - beg;
     std::cout << "\ncompute time: " << runtime.count() << " s\n";
 
-    // Write results to file
+    // Write results to file and find global max shortest-path
     std::ofstream outfile(output_file);
-    
     if (!outfile) {
         std::cerr << "ERROR: could not open output file\n";
         exit(-1);
@@ -98,18 +101,25 @@ int main(int argc, char* argv[]) {
 
     outfile << "# Single-Source Shortest Path from node " << source << "\n";
     outfile << "# Format: target_node distance\n";
-    
+
+    int global_max_path = INT_MIN;
     for (int i = 0; i < g.nodes; i++) {
         if (dist[i] == INT_MAX) {
             outfile << i << " INF\n";
         } else {
             outfile << i << " " << dist[i] << "\n";
+            if (dist[i] > global_max_path){
+                global_max_path = dist[i];
+            }
         }
     }
 
     outfile.close();
 
     std::cout << "Results written to " << output_file << "\n";
+    std::cout << "Global max shortest-path: ";
+    if (global_max_path == INT_MIN) std::cout << "None found\n";
+    else std::cout << global_max_path << "\n";
 
     // Clean up
     delete[] dist;
