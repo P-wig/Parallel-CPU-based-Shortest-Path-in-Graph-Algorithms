@@ -22,6 +22,7 @@ Drawbacks:
 
 Summary:
 - MPI Dijkstra is correct but slow for large graphs.
+- more worker nodes inversely affects performance due to communication overhead.
 - Use other parallel SSSP algorithms for better scalability in distributed environments.
 */
 
