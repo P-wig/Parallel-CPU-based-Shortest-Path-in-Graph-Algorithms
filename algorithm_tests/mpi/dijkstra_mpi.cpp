@@ -119,9 +119,7 @@ int main(int argc, char* argv[]) {
     // Only rank 0 reads the graph
     ECLgraph g;
     if (rank == 0) {
-        std::cout << "About to read graph..." << std::endl << std::flush;
         g = readECLgraph(argv[1]);
-        std::cout << "Finished reading graph." << std::endl << std::flush;
     }
     // Broadcast number of nodes to all ranks
     MPI_Bcast(&g.nodes, 1, MPI_INT, 0, MPI_COMM_WORLD);
@@ -139,20 +137,14 @@ int main(int argc, char* argv[]) {
     // Broadcast node list array (CSR column indices) to all ranks
     MPI_Bcast(g.nlist, g.edges, MPI_INT, 0, MPI_COMM_WORLD);
     // Broadcast edge weights array to all ranks, if present
-    std::cout << "Rank " << rank << " allocated graph arrays." << std::endl << std::flush;
     int has_eweight = (g.eweight != nullptr) ? 1 : 0;
-    std::cout << "Rank " << rank << " before has_eweight broadcast: has_eweight=" << has_eweight << std::endl << std::flush;
     MPI_Bcast(&has_eweight, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    std::cout << "Rank " << rank << " after has_eweight broadcast: has_eweight=" << has_eweight << std::endl << std::flush;
 
     if (has_eweight) {
         if (rank != 0) g.eweight = new int[g.edges];
-        std::cout << "Rank " << rank << " before eweight broadcast." << std::endl << std::flush;
         MPI_Bcast(g.eweight, g.edges, MPI_INT, 0, MPI_COMM_WORLD);
-        std::cout << "Rank " << rank << " after eweight broadcast." << std::endl << std::flush;
     } else {
         g.eweight = nullptr;
-        std::cout << "Rank " << rank << " set eweight to nullptr." << std::endl << std::flush;
     }
 
     if (rank == 0) {
@@ -162,7 +154,7 @@ int main(int argc, char* argv[]) {
         std::cout << "edges: " << g.edges << "\n";
         if (g.eweight != nullptr) std::cout << "graph has edge weights\n";
         else std::cout << "graph has no edge weights (using weight = 1)\n";
-        std::cout << "After reading graph: g.eweight=" << g.eweight << ", g.edges=" << g.edges << std::endl << std::flush;
+        std::cout << "MPI ranks used: " << size << "\n";
     }
 
     std::vector<int> dist(g.nodes, INT_MAX);
