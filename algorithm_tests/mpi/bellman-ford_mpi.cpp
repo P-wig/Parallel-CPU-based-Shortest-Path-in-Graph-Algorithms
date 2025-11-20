@@ -136,6 +136,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (rank == 0) {
+        std::cout << "Single-Source Shortest Path using Bellman-Ford with MPI\n";
         std::cout << "input: " << argv[1] << "\n";
         std::cout << "output: " << output_file << "\n";
         std::cout << "nodes: " << g.nodes << "\n";
