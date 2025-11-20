@@ -38,8 +38,12 @@ void delta_stepping_mpi(const ECLgraph& g, int source, std::vector<int>& dist, i
     dist.assign(n, INT_MAX);
     dist[source] = 0;
 
+    int block_size = (n + size - 1) / size;
+    int block_start = rank * block_size;
+    int block_end = std::min(n, block_start + block_size);
+
     std::vector<std::set<int>> buckets((n * delta) / delta + 2);
-    if (source % size == rank)
+    if (source >= block_start && source < block_end)
         buckets[0].insert(source);
 
     int current_bucket = 0;
@@ -66,9 +70,9 @@ void delta_stepping_mpi(const ECLgraph& g, int source, std::vector<int>& dist, i
             S.insert(all_nodes.begin(), all_nodes.end());
             buckets[current_bucket].clear();
 
-            // Light edge relaxation (round-robin)
+            // Light edge relaxation (block distribution)
             for (int u : S) {
-                if (u % size != rank) continue;
+                if (u < block_start || u >= block_end) continue;
                 int start = g.nindex[u];
                 int end = g.nindex[u + 1];
                 for (int i = start; i < end; i++) {
@@ -86,9 +90,9 @@ void delta_stepping_mpi(const ECLgraph& g, int source, std::vector<int>& dist, i
             }
             MPI_Allreduce(MPI_IN_PLACE, dist.data(), n, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
         }
-        // Heavy edge relaxation (round-robin)
+        // Heavy edge relaxation (block distribution)
         for (int u : S) {
-            if (u % size != rank) continue;
+            if (u < block_start || u >= block_end) continue;
             int start = g.nindex[u];
             int end = g.nindex[u + 1];
             for (int i = start; i < end; i++) {

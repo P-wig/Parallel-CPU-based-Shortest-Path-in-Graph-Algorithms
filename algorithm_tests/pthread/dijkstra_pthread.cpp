@@ -1,12 +1,12 @@
 /*
 Compile: g++ -std=c++17 -O2 -pthread -I. -o algorithm_tests/pthread/dijkstra_pthread algorithm_tests/pthread/dijkstra_pthread.cpp
 Run: ./algorithm_tests/pthread/dijkstra_pthread internet.egr 4
-*/
 
-/*
 Dijkstra's Algorithm: Parallelization Deficits (pthreads/shared-memory)
 
 - Inherently Sequential: Dijkstra's algorithm relies on selecting the global minimum unvisited node in each iteration, which is a fundamentally sequential operation. This limits parallelism to only the edge relaxation phase for the current node.
+
+- Avoiding the Priority Queue: Instead of using a priority queue, thread 0 performs a linear scan of the dist[] array to find the global minimum unvisited node in each iteration. This is possible because all threads share memory, and the scan is efficient for moderate graph sizes. This approach avoids the complexity and synchronization overhead of a concurrent priority queue.
 
 - Poor Scalability: For most real-world graphs, the number of neighbors per node is small compared to the number of nodes. As a result, most threads are idle during edge relaxation, and increasing thread count leads to diminishing returns or even slower performance.
 
