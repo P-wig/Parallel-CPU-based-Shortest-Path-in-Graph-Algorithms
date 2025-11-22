@@ -45,8 +45,9 @@ static pthread_mutex_t* node_mutexes;
 static std::atomic<int> bucket_frontier(0);
 static int* finalized_per_bucket; // Array to count finalized nodes per bucket
 static std::atomic<bool> changed_global;
-static std::set<int> S_global; // Add at file scope
+static std::set<int> S_global; // global set for bucket
 static pthread_mutex_t S_mutex = PTHREAD_MUTEX_INITIALIZER; // For S_global
+static std::atomic<bool> light_phase_done;
 
 static void* delta_stepping_pthread(void* arg) {
     const int tid = (int)(intptr_t)arg;
@@ -70,6 +71,9 @@ static void* delta_stepping_pthread(void* arg) {
         if (tid == 0) {
             S_global.clear();
         }
+        pthread_barrier_wait(&barrier);
+
+        if (tid == 0) light_phase_done = false;
         pthread_barrier_wait(&barrier);
 
         while (true) {
@@ -137,7 +141,13 @@ static void* delta_stepping_pthread(void* arg) {
 
             bool should_continue = changed_global && !bucket_empty_flag;
             pthread_barrier_wait(&barrier);
-            if (!should_continue && bucket_empty_flag) break;
+
+            if (tid == 0) {
+                light_phase_done = (!should_continue && bucket_empty_flag);
+            }
+            pthread_barrier_wait(&barrier);
+
+            if (light_phase_done) break;
         }
 
         // Heavy edge phase
