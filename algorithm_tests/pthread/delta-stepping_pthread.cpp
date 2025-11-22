@@ -32,7 +32,6 @@ Arguments:
 static int threads;
 static int delta;
 static pthread_barrier_t barrier;
-static pthread_mutex_t bucket_mutex = PTHREAD_MUTEX_INITIALIZER;
 static ECLgraph g;
 static std::atomic<int>* dist;
 static int source = 0;
@@ -43,6 +42,11 @@ static int* finalized;
 static int bucket_count;
 static std::vector<std::vector<std::set<int>>> local_buckets; // [thread][bucket]
 static pthread_mutex_t* node_mutexes;
+static std::atomic<int> bucket_frontier(0);
+static int* finalized_per_bucket; // Array to count finalized nodes per bucket
+static std::atomic<bool> changed_global;
+static std::set<int> S_global; // Add at file scope
+static pthread_mutex_t S_mutex = PTHREAD_MUTEX_INITIALIZER; // For S_global
 
 static void* delta_stepping_pthread(void* arg) {
     const int tid = (int)(intptr_t)arg;
@@ -62,14 +66,17 @@ static void* delta_stepping_pthread(void* arg) {
 
         // Light edge phase
         static std::vector<int> curr_nodes;
-        static bool bucket_empty;
-        std::set<int> S; // Accumulate all nodes ever present in the bucket
+        static bool bucket_empty_flag;
+        if (tid == 0) {
+            S_global.clear();
+        }
+        pthread_barrier_wait(&barrier);
+
         while (true) {
             if (tid == 0) {
                 curr_nodes.assign(buckets[curr_bucket].begin(), buckets[curr_bucket].end());
-                // Add all nodes about to be processed to S
-                S.insert(buckets[curr_bucket].begin(), buckets[curr_bucket].end());
                 buckets[curr_bucket].clear();
+                changed_global = false;
             }
             pthread_barrier_wait(&barrier);
 
@@ -78,9 +85,11 @@ static void* delta_stepping_pthread(void* arg) {
             int begin = tid * block;
             int end = std::min(curr_size, begin + block);
 
+            // Each thread accumulates its nodes into S_global
+            std::set<int> local_S;
             for (int i = begin; i < end; i++) {
                 int u = curr_nodes[i];
-                // S.insert(u); // No longer needed here, handled above
+                local_S.insert(u);
                 int start = g.nindex[u];
                 int finish = g.nindex[u + 1];
                 for (int e = start; e < finish; e++) {
@@ -93,8 +102,10 @@ static void* delta_stepping_pthread(void* arg) {
                         while (new_dist < old_dist) {
                             if (dist[v].compare_exchange_weak(old_dist, new_dist)) {
                                 int b = new_dist / delta;
-                                if (b < curr_bucket) b = curr_bucket;
+                                int frontier = bucket_frontier.load();
+                                if (b < frontier) b = frontier;
                                 local_buckets[tid][b].insert(v);
+                                if (b == curr_bucket) changed_global = true;
                                 break;
                             }
                         }
@@ -102,30 +113,42 @@ static void* delta_stepping_pthread(void* arg) {
                     }
                 }
             }
+            // Merge local_S into S_global
+            pthread_mutex_lock(&S_mutex);
+            S_global.insert(local_S.begin(), local_S.end());
+            pthread_mutex_unlock(&S_mutex);
+
             pthread_barrier_wait(&barrier);
 
             // Merge thread-local buckets into global buckets after each pass
             if (tid == 0) {
                 for (int t = 0; t < threads; t++) {
                     for (int b = 0; b < bucket_count; b++) {
-                        // Add all new nodes to S if they are in the current bucket
-                        if (b == curr_bucket) {
-                            S.insert(local_buckets[t][b].begin(), local_buckets[t][b].end());
-                        }
                         buckets[b].insert(local_buckets[t][b].begin(), local_buckets[t][b].end());
                         local_buckets[t][b].clear();
                     }
                 }
             }
             pthread_barrier_wait(&barrier);
-
-            if (tid == 0) bucket_empty = buckets[curr_bucket].empty();
             pthread_barrier_wait(&barrier);
-            if (bucket_empty) break;
+
+            if (tid == 0) bucket_empty_flag = buckets[curr_bucket].empty();
+            pthread_barrier_wait(&barrier);
+
+            bool should_continue = changed_global && !bucket_empty_flag;
+            pthread_barrier_wait(&barrier);
+            if (!should_continue && bucket_empty_flag) break;
         }
 
-        // Heavy edge phase (unchanged)
-        std::vector<int> S_vec(S.begin(), S.end());
+        // Heavy edge phase
+        std::vector<int> S_vec;
+        if (tid == 0) {
+            S_vec.assign(S_global.begin(), S_global.end());
+        }
+        pthread_barrier_wait(&barrier);
+        if (tid != 0) {
+            S_vec.assign(S_global.begin(), S_global.end());
+        }
         int S_size = S_vec.size();
         int block = (S_size + threads - 1) / threads;
         int begin = tid * block;
@@ -145,10 +168,9 @@ static void* delta_stepping_pthread(void* arg) {
                     while (new_dist < old_dist) {
                         if (dist[v].compare_exchange_weak(old_dist, new_dist)) {
                             int b = new_dist / delta;
+                            int frontier = bucket_frontier.load();
+                            if (b < frontier) b = frontier;
                             local_buckets[tid][b].insert(v);
-                            if (b < curr_bucket) {
-                                printf("WARNING: Thread %d inserting node %d into past bucket %d (current %d)\n", tid, v, b, curr_bucket);
-                            }
                             break;
                         }
                     }
@@ -169,29 +191,49 @@ static void* delta_stepping_pthread(void* arg) {
         }
         pthread_barrier_wait(&barrier);
 
-        // Finalize all nodes in S after all updates
-        pthread_barrier_wait(&barrier); // Ensure all updates are done
-        for (int u : S) finalized[u] = 1;
-        pthread_barrier_wait(&barrier); // Ensure all threads see finalized state
+        // Finalize all nodes in S_global after all updates
+        pthread_barrier_wait(&barrier);
+        for (int u : S_vec) finalized[u] = 1;
+        pthread_barrier_wait(&barrier);
 
-        // Debug output: print number of finalized nodes in each bucket
+        // Debug output: print number of unique finalized nodes in each bucket
         if (tid == 0) {
-            int finalized_count = 0;
-            for (int u : S) if (finalized[u]) finalized_count++;
-            printf("Bucket %d: finalized %d nodes\n", curr_bucket, finalized_count);
+            static std::set<int> already_finalized; // persists across buckets
+            std::set<int> unique_this_bucket;
+            for (int u : S_vec) {
+                if (already_finalized.insert(u).second) { // true if not already finalized
+                    unique_this_bucket.insert(u);
+                }
+            }
+            finalized_per_bucket[curr_bucket] += unique_this_bucket.size();
         }
+        pthread_barrier_wait(&barrier);
+
+        // Advance curr_bucket
+        if (tid == 0) {
+            done = true;
+            for (curr_bucket = bucket_frontier; curr_bucket < bucket_count; curr_bucket++) {
+                if (!buckets[curr_bucket].empty()) {
+                    done = false;
+                    break;
+                }
+            }
+            bucket_frontier = curr_bucket;
+        }
+        pthread_barrier_wait(&barrier);
+        if (done) break;
     }
     return nullptr;
 }
 
 int main(int argc, char* argv[]) {
     std::cout << "Single-Source Shortest Path using Delta-Stepping with pthreads\n";
-    if (argc != 3) { // Only input_file and num_threads
+    if (argc != 3) {
         std::cerr << "USAGE: " << argv[0] << " input_file num_threads\n";
         return -1;
     }
     threads = std::atoi(argv[2]);
-    delta = 1000; // Use constant value
+    delta = 1000;
     if (threads < 1) {
         std::cerr << "ERROR: num_threads must be at least 1\n";
         return -1;
@@ -217,7 +259,7 @@ int main(int argc, char* argv[]) {
     } else {
         max_dist = g.edges;
     }
-    bucket_count = std::max(g.nodes, max_dist / delta + 2);
+    bucket_count = max_dist / delta + 2;
     buckets.resize(bucket_count);
     local_buckets.resize(threads);
     for (int t = 0; t < threads; t++)
@@ -227,6 +269,7 @@ int main(int argc, char* argv[]) {
     pthread_barrier_init(&barrier, nullptr, threads);
     pthread_t* handles = new pthread_t[threads - 1];
     finalized = new int[g.nodes]();
+    finalized_per_bucket = new int[bucket_count]();
     node_mutexes = new pthread_mutex_t[g.nodes];
     for (int i = 0; i < g.nodes; i++) {
         pthread_mutex_init(&node_mutexes[i], nullptr);
@@ -271,10 +314,18 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "Reachable nodes from source: " << reachable << "\n";
 
+    // After all threads complete, in main()
+    std::cout << "Per-bucket finalized node counts:\n";
+    for (int b = 0; b < bucket_count; b++) {
+        if (finalized_per_bucket[b] > 0)
+            std::cout << "Bucket " << b << ": finalized " << finalized_per_bucket[b] << " nodes\n";
+    }
+
     pthread_barrier_destroy(&barrier);
     delete[] handles;
     delete[] dist;
     delete[] finalized;
+    delete[] finalized_per_bucket;
     delete[] node_mutexes;
     freeECLgraph(g);
     return 0;
