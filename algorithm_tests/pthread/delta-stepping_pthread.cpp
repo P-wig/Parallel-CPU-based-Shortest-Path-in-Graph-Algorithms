@@ -48,6 +48,7 @@ static std::atomic<bool> changed_global;
 static std::set<int> S_global; // global set for bucket
 static pthread_mutex_t S_mutex = PTHREAD_MUTEX_INITIALIZER; // For S_global
 static std::atomic<bool> light_phase_done;
+static std::atomic<bool> break_flag; // Move outside the loop, shared by all threads
 
 static void* delta_stepping_pthread(void* arg) {
     const int tid = (int)(intptr_t)arg;
@@ -67,7 +68,7 @@ static void* delta_stepping_pthread(void* arg) {
 
         // Light edge phase
         static std::vector<int> curr_nodes;
-        static std::atomic<bool> break_flag; // Move outside the loop, shared by all threads
+        static std::atomic<bool> break_flag;
         if (tid == 0) {
             S_global.clear();
         }
