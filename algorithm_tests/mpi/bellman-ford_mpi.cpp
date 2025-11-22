@@ -48,10 +48,10 @@ bool bellman_ford_mpi(const ECLgraph& g, int source, std::vector<int>& dist, int
     int block_start = rank * block_size;
     int block_end = std::min(n, block_start + block_size);
 
-    // Round-robin partitioning: each rank processes nodes where u % size == rank
     for (int iter = 1; iter < n; iter++) {
         bool changed_local = false;
-        for (int u = rank; u < n; u += size) {
+        // Block partitioning: each rank processes a contiguous block of nodes
+        for (int u = block_start; u < block_end; u++) {
             int start = g.nindex[u];
             int end = g.nindex[u + 1];
             for (int i = start; i < end; i++) {
@@ -66,7 +66,6 @@ bool bellman_ford_mpi(const ECLgraph& g, int source, std::vector<int>& dist, int
         // Synchronize distances across all ranks
         MPI_Allreduce(MPI_IN_PLACE, dist.data(), n, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
 
-        // Check for early exit
         int changed_global = changed_local ? 1 : 0;
         MPI_Allreduce(MPI_IN_PLACE, &changed_global, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
         if (!changed_global) break;
@@ -136,6 +135,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (rank == 0) {
+        std::cout << "Single-Source Shortest Path using Bellman-Ford with MPI\n";
         std::cout << "input: " << argv[1] << "\n";
         std::cout << "output: " << output_file << "\n";
         std::cout << "nodes: " << g.nodes << "\n";

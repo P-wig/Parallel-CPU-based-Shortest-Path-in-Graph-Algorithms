@@ -38,23 +38,16 @@ Summary:
 // MPI Dijkstra: rank 0 manages the queue, all ranks relax edges
 void mpi_dijkstra(const ECLgraph& g, int source, std::vector<int>& dist, int rank, int size) {
     int n = g.nodes;
-    int block_size = (n + size - 1) / size;
-    int block_start = rank * block_size;
-    int block_end = std::min(n, block_start + block_size);
     std::vector<bool> visited(n, false);
     std::vector<char> updated(n, 0);
 
-    if (rank == 0) {
-        dist[source] = 0;
-    }
+    if (rank == 0) dist[source] = 0;
 
     std::priority_queue<std::pair<int, int>, std::vector<std::pair<int, int>>, std::greater<>> queue;
-    if (rank == 0) {
-        queue.push({0, source});
-    }
+    if (rank == 0) queue.push({0, source});
 
     while (true) {
-        std::fill(updated.begin(), updated.end(), 0); // instead of false
+        std::fill(updated.begin(), updated.end(), 0);
 
         int curr_node = -1, curr_dist = INT_MAX;
         if (rank == 0 && !queue.empty()) {
@@ -65,18 +58,19 @@ void mpi_dijkstra(const ECLgraph& g, int source, std::vector<int>& dist, int ran
         MPI_Bcast(&curr_node, 1, MPI_INT, 0, MPI_COMM_WORLD);
         MPI_Bcast(&curr_dist, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-        if (curr_node == -1) {
-            std::cout << "Rank " << rank << ": received curr_node == -1, breaking loop." << std::endl << std::flush;
-            break;
-        }
+        if (curr_node == -1) break;
 
         if (!visited[curr_node]) {
             visited[curr_node] = true;
             int start = g.nindex[curr_node];
             int end = g.nindex[curr_node + 1];
-            for (int i = start + rank; i < end; i += size) {
+            int edge_count = end - start;
+            int block_size = (edge_count + size - 1) / size;
+            int block_start = start + rank * block_size;
+            int block_end = std::min(end, block_start + block_size);
+            for (int i = block_start; i < block_end; i++) {
                 int v = g.nlist[i];
-                int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
+                int weight = (g.eweight != nullptr) ? g.eweight[i] : 1;
                 int new_dist = curr_dist + weight;
                 if (new_dist < dist[v]) {
                     dist[v] = new_dist;
@@ -92,7 +86,6 @@ void mpi_dijkstra(const ECLgraph& g, int source, std::vector<int>& dist, int ran
             for (int v = 0; v < n; v++) {
                 if (updated[v] && !visited[v]) {
                     queue.push({dist[v], v});
-                    updated[v] = 0; // Clear update flag after pushing
                 }
             }
         }
