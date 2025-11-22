@@ -67,13 +67,10 @@ static void* delta_stepping_pthread(void* arg) {
 
         // Light edge phase
         static std::vector<int> curr_nodes;
-        static bool bucket_empty_flag;
+        static std::atomic<bool> break_flag; // Move outside the loop, shared by all threads
         if (tid == 0) {
             S_global.clear();
         }
-        pthread_barrier_wait(&barrier);
-
-        if (tid == 0) light_phase_done = false;
         pthread_barrier_wait(&barrier);
 
         while (true) {
@@ -81,6 +78,7 @@ static void* delta_stepping_pthread(void* arg) {
                 curr_nodes.assign(buckets[curr_bucket].begin(), buckets[curr_bucket].end());
                 buckets[curr_bucket].clear();
                 changed_global = false;
+                break_flag.store(false, std::memory_order_relaxed); // Reset at start of each iteration
             }
             pthread_barrier_wait(&barrier);
 
@@ -89,7 +87,6 @@ static void* delta_stepping_pthread(void* arg) {
             int begin = tid * block;
             int end = std::min(curr_size, begin + block);
 
-            // Each thread accumulates its nodes into S_global
             std::set<int> local_S;
             for (int i = begin; i < end; i++) {
                 int u = curr_nodes[i];
@@ -117,14 +114,12 @@ static void* delta_stepping_pthread(void* arg) {
                     }
                 }
             }
-            // Merge local_S into S_global
             pthread_mutex_lock(&S_mutex);
             S_global.insert(local_S.begin(), local_S.end());
             pthread_mutex_unlock(&S_mutex);
 
             pthread_barrier_wait(&barrier);
 
-            // Merge thread-local buckets into global buckets after each pass
             if (tid == 0) {
                 for (int t = 0; t < threads; t++) {
                     for (int b = 0; b < bucket_count; b++) {
@@ -132,22 +127,13 @@ static void* delta_stepping_pthread(void* arg) {
                         local_buckets[t][b].clear();
                     }
                 }
+                bool bucket_empty = buckets[curr_bucket].empty();
+                if (!changed_global || bucket_empty) {
+                    break_flag.store(true, std::memory_order_relaxed);
+                }
             }
             pthread_barrier_wait(&barrier);
-            pthread_barrier_wait(&barrier);
-
-            if (tid == 0) bucket_empty_flag = buckets[curr_bucket].empty();
-            pthread_barrier_wait(&barrier);
-
-            bool should_continue = changed_global && !bucket_empty_flag;
-            pthread_barrier_wait(&barrier);
-
-            if (tid == 0) {
-                light_phase_done = (!should_continue && bucket_empty_flag);
-            }
-            pthread_barrier_wait(&barrier);
-
-            if (light_phase_done) break;
+            if (break_flag.load(std::memory_order_relaxed)) break;
         }
 
         // Heavy edge phase
