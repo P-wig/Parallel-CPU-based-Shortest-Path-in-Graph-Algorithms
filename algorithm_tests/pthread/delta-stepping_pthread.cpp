@@ -67,6 +67,8 @@ static void* delta_stepping_pthread(void* arg) {
         while (true) {
             if (tid == 0) {
                 curr_nodes.assign(buckets[curr_bucket].begin(), buckets[curr_bucket].end());
+                // Add all nodes about to be processed to S
+                S.insert(buckets[curr_bucket].begin(), buckets[curr_bucket].end());
                 buckets[curr_bucket].clear();
             }
             pthread_barrier_wait(&barrier);
@@ -78,7 +80,7 @@ static void* delta_stepping_pthread(void* arg) {
 
             for (int i = begin; i < end; i++) {
                 int u = curr_nodes[i];
-                S.insert(u); // Accumulate, do not clear S
+                // S.insert(u); // No longer needed here, handled above
                 int start = g.nindex[u];
                 int finish = g.nindex[u + 1];
                 for (int e = start; e < finish; e++) {
@@ -91,10 +93,10 @@ static void* delta_stepping_pthread(void* arg) {
                         while (new_dist < old_dist) {
                             if (dist[v].compare_exchange_weak(old_dist, new_dist)) {
                                 int b = new_dist / delta;
+                                if (b < curr_bucket) b = curr_bucket;
                                 local_buckets[tid][b].insert(v);
                                 break;
                             }
-                            // If failed, old_dist is updated to the current value, so loop continues
                         }
                         pthread_mutex_unlock(&node_mutexes[v]);
                     }
@@ -106,6 +108,10 @@ static void* delta_stepping_pthread(void* arg) {
             if (tid == 0) {
                 for (int t = 0; t < threads; t++) {
                     for (int b = 0; b < bucket_count; b++) {
+                        // Add all new nodes to S if they are in the current bucket
+                        if (b == curr_bucket) {
+                            S.insert(local_buckets[t][b].begin(), local_buckets[t][b].end());
+                        }
                         buckets[b].insert(local_buckets[t][b].begin(), local_buckets[t][b].end());
                         local_buckets[t][b].clear();
                     }
@@ -140,6 +146,9 @@ static void* delta_stepping_pthread(void* arg) {
                         if (dist[v].compare_exchange_weak(old_dist, new_dist)) {
                             int b = new_dist / delta;
                             local_buckets[tid][b].insert(v);
+                            if (b < curr_bucket) {
+                                printf("WARNING: Thread %d inserting node %d into past bucket %d (current %d)\n", tid, v, b, curr_bucket);
+                            }
                             break;
                         }
                     }
@@ -164,6 +173,13 @@ static void* delta_stepping_pthread(void* arg) {
         pthread_barrier_wait(&barrier); // Ensure all updates are done
         for (int u : S) finalized[u] = 1;
         pthread_barrier_wait(&barrier); // Ensure all threads see finalized state
+
+        // Debug output: print number of finalized nodes in each bucket
+        if (tid == 0) {
+            int finalized_count = 0;
+            for (int u : S) if (finalized[u]) finalized_count++;
+            printf("Bucket %d: finalized %d nodes\n", curr_bucket, finalized_count);
+        }
     }
     return nullptr;
 }
