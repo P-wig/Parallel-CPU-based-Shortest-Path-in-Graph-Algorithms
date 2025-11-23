@@ -30,86 +30,177 @@ Delta-Stepping is designed for shared-memory parallelism (threads, OpenMP), not 
 #include <mpi.h>
 #include "ECLgraph.h"
 #include <algorithm>
-#include <cmath>
+#include <atomic>
 
-// Parallel Delta-Stepping SSSP (MPI, block partitioning)
 void delta_stepping_mpi(const ECLgraph& g, int source, std::vector<int>& dist, int delta, int rank, int size) {
     int n = g.nodes;
     dist.assign(n, INT_MAX);
     dist[source] = 0;
 
-    int block_size = (n + size - 1) / size;
-    int block_start = rank * block_size;
-    int block_end = std::min(n, block_start + block_size);
+    int bucket_count = n / delta + 2;
+    std::vector<std::set<int>> buckets(bucket_count);
+    if (rank == 0) buckets[0].insert(source);
 
-    std::vector<std::set<int>> buckets((n * delta) / delta + 2);
-    if (source >= block_start && source < block_end)
-        buckets[0].insert(source);
-
-    int current_bucket = 0;
-    while (current_bucket < buckets.size()) {
-        std::set<int> S;
-        // Light edge relaxation
+    int curr_bucket = 0;
+    while (curr_bucket < bucket_count) {
+        // --- Light edge phase: repeat until current bucket is empty globally ---
+        std::set<int> S; // All nodes ever in this bucket (for heavy phase)
         while (true) {
             // Gather all nodes in current bucket across ranks
-            std::vector<int> local_nodes(buckets[current_bucket].begin(), buckets[current_bucket].end());
+            std::vector<int> local_nodes(buckets[curr_bucket].begin(), buckets[curr_bucket].end());
             int local_count = local_nodes.size();
-            std::vector<int> all_nodes;
-            int total_count = 0;
-            std::vector<int> counts(size);
+            std::vector<int> counts(size), displs(size);
             MPI_Allgather(&local_count, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+            int total_count = 0;
             for (int c : counts) total_count += c;
-            std::vector<int> displs(size);
             displs[0] = 0;
             for (int i = 1; i < size; i++) displs[i] = displs[i-1] + counts[i-1];
-            all_nodes.resize(total_count);
+            std::vector<int> global_bucket(total_count);
             MPI_Allgatherv(local_nodes.data(), local_count, MPI_INT,
-                           all_nodes.data(), counts.data(), displs.data(), MPI_INT, MPI_COMM_WORLD);
+                        global_bucket.data(), counts.data(), displs.data(), MPI_INT, MPI_COMM_WORLD);
 
-            if (all_nodes.empty()) break;
-            S.insert(all_nodes.begin(), all_nodes.end());
-            buckets[current_bucket].clear();
+            // If bucket is empty globally, break
+            if (global_bucket.empty()) break;
 
-            // Light edge relaxation (block distribution)
-            for (int u : S) {
-                if (u < block_start || u >= block_end) continue;
+            // Add all nodes seen in this bucket to S
+            S.insert(global_bucket.begin(), global_bucket.end());
+
+            // Each rank processes a block of nodes in the global bucket
+            int total = global_bucket.size();
+            int block = (total + size - 1) / size;
+            int begin = rank * block;
+            int end = std::min(total, begin + block);
+
+            std::vector<int> local_dist_updates(n, INT_MAX);
+            for (int i = begin; i < end; ++i) {
+                int u = global_bucket[i];
                 int start = g.nindex[u];
-                int end = g.nindex[u + 1];
-                for (int i = start; i < end; i++) {
-                    int v = g.nlist[i];
-                    int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
-                    if (weight <= delta) {
-                        int new_dist = dist[u] + weight;
-                        if (new_dist < dist[v]) {
-                            dist[v] = new_dist;
-                            int b = new_dist / delta;
-                            buckets[b].insert(v);
+                int finish = g.nindex[u + 1];
+                for (int e = start; e < finish; e++) {
+                    int v = g.nlist[e];
+                    int w = (g.eweight != NULL) ? g.eweight[e] : 1;
+                    if (w <= delta) {
+                        int new_dist = dist[u] + w;
+                        if (new_dist < local_dist_updates[v]) {
+                            local_dist_updates[v] = new_dist;
                         }
                     }
                 }
             }
+
+            // Allreduce to update global dist
+            for (int i = 0; i < n; i++) {
+                if (local_dist_updates[i] < dist[i]) {
+                    dist[i] = local_dist_updates[i];
+                }
+            }
             MPI_Allreduce(MPI_IN_PLACE, dist.data(), n, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+
+            // Insert changed nodes into their new buckets (light edge phase)
+            buckets[curr_bucket].clear();
+            for (int i = 0; i < n; ++i) {
+                if (local_dist_updates[i] < INT_MAX && dist[i] == local_dist_updates[i]) {
+                    int b = dist[i] / delta;
+                    // Allow b == curr_bucket for repeated light relaxations
+                    if (b < bucket_count && b >= curr_bucket) {
+                        buckets[b].insert(i);
+                    }
+                }
+            }
+
+            // --- Synchronize all buckets after this light edge round ---
+            for (int b = 0; b < bucket_count; ++b) {
+                std::vector<int> local_nodes(buckets[b].begin(), buckets[b].end());
+                int local_count = local_nodes.size();
+                std::vector<int> counts(size), displs(size);
+                MPI_Allgather(&local_count, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+                int total_count = 0;
+                for (int c : counts) total_count += c;
+                displs[0] = 0;
+                for (int i = 1; i < size; i++) displs[i] = displs[i-1] + counts[i-1];
+                std::vector<int> global_nodes(total_count);
+                MPI_Allgatherv(local_nodes.data(), local_count, MPI_INT,
+                            global_nodes.data(), counts.data(), displs.data(), MPI_INT, MPI_COMM_WORLD);
+                buckets[b].clear();
+                for (int u : global_nodes) buckets[b].insert(u);
+            }
         }
-        // Heavy edge relaxation (block distribution)
-        for (int u : S) {
-            if (u < block_start || u >= block_end) continue;
+
+        // --- Heavy edge phase: process all nodes ever in this bucket (S) ---
+        // Gather S across all ranks
+        std::vector<int> local_S(S.begin(), S.end());
+        int local_count = local_S.size();
+        std::vector<int> counts(size), displs(size);
+        MPI_Allgather(&local_count, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+        int total_count = 0;
+        for (int c : counts) total_count += c;
+        displs[0] = 0;
+        for (int i = 1; i < size; i++) displs[i] = displs[i-1] + counts[i-1];
+        std::vector<int> global_S(total_count);
+        MPI_Allgatherv(local_S.data(), local_count, MPI_INT,
+                    global_S.data(), counts.data(), displs.data(), MPI_INT, MPI_COMM_WORLD);
+
+        // Each rank processes a block of nodes in S
+        int total = global_S.size();
+        int block = (total + size - 1) / size;
+        int begin = rank * block;
+        int end = std::min(total, begin + block);
+
+        std::vector<int> heavy_local_dist_updates(n, INT_MAX);
+        for (int i = begin; i < end; ++i) {
+            int u = global_S[i];
             int start = g.nindex[u];
-            int end = g.nindex[u + 1];
-            for (int i = start; i < end; i++) {
-                int v = g.nlist[i];
-                int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
-                if (weight > delta) {
-                    int new_dist = dist[u] + weight;
-                    if (new_dist < dist[v]) {
-                        dist[v] = new_dist;
-                        int b = new_dist / delta;
-                        buckets[b].insert(v);
+            int finish = g.nindex[u + 1];
+            for (int e = start; e < finish; e++) {
+                int v = g.nlist[e];
+                int w = (g.eweight != NULL) ? g.eweight[e] : 1;
+                if (w > delta) {
+                    int new_dist = dist[u] + w;
+                    if (new_dist < heavy_local_dist_updates[v]) {
+                        heavy_local_dist_updates[v] = new_dist;
                     }
                 }
             }
         }
+
+        // Allreduce to update global dist after heavy phase
+        for (int i = 0; i < n; i++) {
+            if (heavy_local_dist_updates[i] < dist[i]) {
+                dist[i] = heavy_local_dist_updates[i];
+            }
+        }
         MPI_Allreduce(MPI_IN_PLACE, dist.data(), n, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-        current_bucket++;
+
+        // Insert changed nodes into their new buckets (heavy edge phase)
+        for (int i = 0; i < n; ++i) {
+            if (heavy_local_dist_updates[i] < INT_MAX && dist[i] == heavy_local_dist_updates[i]) {
+                int b = dist[i] / delta;
+                if (b < bucket_count && b > curr_bucket) {
+                    buckets[b].insert(i);
+                }
+            }
+        }
+
+        // --- Synchronize all buckets after heavy edge phase ---
+        for (int b = 0; b < bucket_count; ++b) {
+            std::vector<int> local_nodes(buckets[b].begin(), buckets[b].end());
+            int local_count = local_nodes.size();
+            std::vector<int> counts(size), displs(size);
+            MPI_Allgather(&local_count, 1, MPI_INT, counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+            int total_count = 0;
+            for (int c : counts) total_count += c;
+            displs[0] = 0;
+            for (int i = 1; i < size; i++) displs[i] = displs[i-1] + counts[i-1];
+            std::vector<int> global_nodes(total_count);
+            MPI_Allgatherv(local_nodes.data(), local_count, MPI_INT,
+                        global_nodes.data(), counts.data(), displs.data(), MPI_INT, MPI_COMM_WORLD);
+            buckets[b].clear();
+            for (int u : global_nodes) buckets[b].insert(u);
+        }
+
+        // Remove all nodes from the current bucket (done for this round)
+        buckets[curr_bucket].clear();
+        curr_bucket++;
     }
 }
 
@@ -156,22 +247,8 @@ int main(int argc, char* argv[]) {
         g.eweight = nullptr;
     }
 
-    // Calculate average edge weight (all ranks get the same value)
-    int average_edge_weight = 1;
-    if (g.eweight != nullptr && g.edges > 0) {
-        long long sum_weights = 0;
-        if (rank == 0) {
-            for (int i = 0; i < g.edges; i++) {
-                sum_weights += g.eweight[i];
-            }
-        }
-        // Broadcast sum_weights from rank 0
-        MPI_Bcast(&sum_weights, 1, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
-        average_edge_weight = static_cast<int>(sum_weights / g.edges);
-    }
-
     // Set delta to average edge weight
-    int delta = std::max(1, average_edge_weight);
+    int delta = 1000;
 
     if (rank == 0) {
         std::cout << "input: " << argv[1] << "\n";
