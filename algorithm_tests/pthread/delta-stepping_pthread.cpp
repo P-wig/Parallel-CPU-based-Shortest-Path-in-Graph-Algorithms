@@ -235,7 +235,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "ERROR: num_threads must be at least 1\n";
         return -1;
     }
-    std::string output_file = "algorithm_tests/pthread/delta-stepping_pthread_results.txt";
+    std::string output_file = "algorithm_tests/pthread/results/delta-stepping_pthread_results.txt";
     g = readECLgraph(argv[1]);
     std::cout << "input: " << argv[1] << "\n";
     std::cout << "output: " << output_file << "\n";

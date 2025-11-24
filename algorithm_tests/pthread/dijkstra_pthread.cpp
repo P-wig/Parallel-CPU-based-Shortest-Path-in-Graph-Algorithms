@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    std::string output_file = "algorithm_tests/pthread/dijkstra_pthread_results.txt";
+    std::string output_file = "algorithm_tests/pthread/results/dijkstra_pthread_results.txt";
 
     g = readECLgraph(argv[1]);
     std::cout << "input: " << argv[1] << "\n";
