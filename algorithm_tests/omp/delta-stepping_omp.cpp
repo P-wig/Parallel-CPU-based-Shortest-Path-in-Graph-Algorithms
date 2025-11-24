@@ -1,7 +1,7 @@
 /*
 Compile: g++ -fopenmp -O3 -I../.. -static -o delta-stepping_omp delta-stepping_omp.cpp
 
-Run: ./delta-stepping_omp internet.egr [output_file]
+Run: ./delta-stepping_omp input_file num_threads [output_file]
 */
 
 #include <iostream>
@@ -27,8 +27,8 @@ inline int atomic_min(int* addr, int value) {
     return old;
 }
 
-// Parallel Delta-Stepping using OpenMP
-void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
+// Parallel Delta-Stepping using OpenMP with thread-local buckets
+void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta, int num_threads) {
     int n = g.nodes;
     
     // Initialize distances
@@ -38,34 +38,110 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
     }
     dist[source] = 0;
 
-    // Create buckets (using sets for automatic sorting and uniqueness)
-    int num_buckets = n + 1;
-    std::vector<std::set<int>> buckets(num_buckets);
-    omp_lock_t* bucket_locks = new omp_lock_t[num_buckets];
-    for (int i = 0; i < num_buckets; i++) {
-        omp_init_lock(&bucket_locks[i]);
+    // Calculate realistic bucket count based on max possible distance
+    int max_dist = 0;
+    if (g.eweight != NULL) {
+        for (int i = 0; i < g.edges; i++) {
+            max_dist += g.eweight[i];
+        }
+    } else {
+        max_dist = g.edges;
+    }
+    int bucket_count = max_dist / delta + 2;
+
+    // Create global buckets and thread-local buckets
+    std::vector<std::set<int>> buckets(bucket_count);
+    std::vector<std::vector<std::set<int>>> local_buckets(num_threads);
+    for (int t = 0; t < num_threads; t++) {
+        local_buckets[t].resize(bucket_count);
     }
     buckets[0].insert(source);
 
     int current_bucket = 0;
-    while (current_bucket < num_buckets) {
+    int bucket_frontier = 0;
+    
+    while (current_bucket < bucket_count) {
         // Skip empty buckets
         if (buckets[current_bucket].empty()) {
             current_bucket++;
             continue;
         }
 
-        std::set<int> S;
+        std::set<int> S_global;
         
         // Light edge relaxation phase
         while (!buckets[current_bucket].empty()) {
-            // Move current bucket to S
-            S.insert(buckets[current_bucket].begin(), buckets[current_bucket].end());
+            // Move current bucket to temporary vector
+            std::vector<int> curr_nodes(buckets[current_bucket].begin(), buckets[current_bucket].end());
             buckets[current_bucket].clear();
+            bool changed = false;
 
             // Process light edges in parallel
-            std::vector<int> S_vec(S.begin(), S.end());
-            #pragma omp parallel for schedule(dynamic)
+            #pragma omp parallel num_threads(num_threads)
+            {
+                int tid = omp_get_thread_num();
+                std::set<int> local_S;
+                
+                #pragma omp for schedule(dynamic) reduction(||:changed)
+                for (size_t idx = 0; idx < curr_nodes.size(); idx++) {
+                    int u = curr_nodes[idx];
+                    local_S.insert(u);
+                    if (dist[u] == INT_MAX) continue;
+                    
+                    int start = g.nindex[u];
+                    int end = g.nindex[u + 1];
+                    
+                    for (int i = start; i < end; i++) {
+                        int v = g.nlist[i];
+                        int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
+                        
+                        // Only process light edges
+                        if (weight <= delta) {
+                            int new_dist = dist[u] + weight;
+                            
+                            if (new_dist < dist[v]) {
+                                int old = atomic_min(&dist[v], new_dist);
+                                if (new_dist < old) {
+                                    int b = new_dist / delta;
+                                    // Apply bucket frontier
+                                    if (b < bucket_frontier) b = bucket_frontier;
+                                    if (b < bucket_count) {
+                                        local_buckets[tid][b].insert(v);
+                                        if (b == current_bucket) changed = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Merge local S into global S
+                #pragma omp critical
+                {
+                    S_global.insert(local_S.begin(), local_S.end());
+                }
+            }
+
+            // Merge thread-local buckets into global buckets
+            for (int t = 0; t < num_threads; t++) {
+                for (int b = 0; b < bucket_count; b++) {
+                    buckets[b].insert(local_buckets[t][b].begin(), local_buckets[t][b].end());
+                    local_buckets[t][b].clear();
+                }
+            }
+            
+            // Break if no changes or bucket is empty
+            if (!changed || buckets[current_bucket].empty()) break;
+        }
+
+        // Heavy edge relaxation phase
+        std::vector<int> S_vec(S_global.begin(), S_global.end());
+        
+        #pragma omp parallel num_threads(num_threads)
+        {
+            int tid = omp_get_thread_num();
+            
+            #pragma omp for schedule(dynamic)
             for (size_t idx = 0; idx < S_vec.size(); idx++) {
                 int u = S_vec[idx];
                 if (dist[u] == INT_MAX) continue;
@@ -77,18 +153,18 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
                     int v = g.nlist[i];
                     int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
                     
-                    // Only process light edges
-                    if (weight <= delta) {
+                    // Only process heavy edges
+                    if (weight > delta) {
                         int new_dist = dist[u] + weight;
                         
                         if (new_dist < dist[v]) {
                             int old = atomic_min(&dist[v], new_dist);
                             if (new_dist < old) {
                                 int b = new_dist / delta;
-                                if (b < num_buckets) {
-                                    omp_set_lock(&bucket_locks[b]);
-                                    buckets[b].insert(v);
-                                    omp_unset_lock(&bucket_locks[b]);
+                                // Apply bucket frontier
+                                if (b < bucket_frontier) b = bucket_frontier;
+                                if (b < bucket_count) {
+                                    local_buckets[tid][b].insert(v);
                                 }
                             }
                         }
@@ -97,47 +173,21 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
             }
         }
 
-        // Heavy edge relaxation phase
-        std::vector<int> S_vec(S.begin(), S.end());
-        #pragma omp parallel for schedule(dynamic)
-        for (size_t idx = 0; idx < S_vec.size(); idx++) {
-            int u = S_vec[idx];
-            if (dist[u] == INT_MAX) continue;
-            
-            int start = g.nindex[u];
-            int end = g.nindex[u + 1];
-            
-            for (int i = start; i < end; i++) {
-                int v = g.nlist[i];
-                int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
-                
-                // Only process heavy edges
-                if (weight > delta) {
-                    int new_dist = dist[u] + weight;
-                    
-                    if (new_dist < dist[v]) {
-                        int old = atomic_min(&dist[v], new_dist);
-                        if (new_dist < old) {
-                            int b = new_dist / delta;
-                            if (b < num_buckets) {
-                                omp_set_lock(&bucket_locks[b]);
-                                buckets[b].insert(v);
-                                omp_unset_lock(&bucket_locks[b]);
-                            }
-                        }
-                    }
-                }
+        // Merge thread-local buckets after heavy edge phase
+        for (int t = 0; t < num_threads; t++) {
+            for (int b = 0; b < bucket_count; b++) {
+                buckets[b].insert(local_buckets[t][b].begin(), local_buckets[t][b].end());
+                local_buckets[t][b].clear();
             }
         }
 
+        // Advance to next non-empty bucket
+        bucket_frontier = current_bucket;
         current_bucket++;
+        while (current_bucket < bucket_count && buckets[current_bucket].empty()) {
+            current_bucket++;
+        }
     }
-
-    // Cleanup locks
-    for (int i = 0; i < num_buckets; i++) {
-        omp_destroy_lock(&bucket_locks[i]);
-    }
-    delete[] bucket_locks;
 }
 
 int main(int argc, char* argv[]) {
@@ -173,17 +223,7 @@ int main(int argc, char* argv[]) {
         std::cout << "graph has no edge weights (using weight = 1)\n";
     }
 
-    // Calculate average edge weight for delta parameter
-    int average_edge_weight = 1;
-    if (g.eweight != NULL && g.edges > 0) {
-        long long sum_weights = 0;
-        for (int i = 0; i < g.edges; i++) {
-            sum_weights += g.eweight[i];
-        }
-        average_edge_weight = static_cast<int>(sum_weights / g.edges);
-    }
-    int delta = std::max(1, average_edge_weight);
-
+    int delta = 1000;
     std::cout << "delta (bucket width) chosen: " << delta << "\n";
     std::cout << "OpenMP threads: " << omp_get_max_threads() << "\n";
 
@@ -195,7 +235,7 @@ int main(int argc, char* argv[]) {
 
     // execute timed code - compute shortest paths from node 0
     int source = 0;
-    delta_stepping_omp(g, source, dist, delta);
+    delta_stepping_omp(g, source, dist, delta, num_threads);
 
     // end time
     auto end = std::chrono::high_resolution_clock::now();
