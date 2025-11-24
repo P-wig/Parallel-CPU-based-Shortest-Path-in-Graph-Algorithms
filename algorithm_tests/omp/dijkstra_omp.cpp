@@ -56,12 +56,15 @@ static void dijkstra_omp(const ECLgraph& g, int source, int* dist) {
 int main(int argc, char* argv[]) {
   // check command line
   if (argc != 3 && argc != 4) {
-    std::cerr << "USAGE: " << argv[0] << " num_threads input_file [output_file]\n";
+    std::cerr << "USAGE: " << argv[0] << " input_file num_threads [output_file]\n";
     exit(-1);
   }
 
+  // read input
+  ECLgraph g = readECLgraph(argv[1]);
+
   // Set number of threads
-  int num_threads = atoi(argv[1]);
+  int num_threads = atoi(argv[2]);
   if (num_threads < 1) {
     std::cerr << "ERROR: num_threads must be at least 1\n";
     exit(-1);
@@ -72,9 +75,7 @@ int main(int argc, char* argv[]) {
       ? std::string("results/") + argv[3]
       : "results/dijkstra_omp_results.txt";
 
-  // read input
-  ECLgraph g = readECLgraph(argv[2]);
-  std::cout << "input: " << argv[2] << "\n";
+  std::cout << "input: " << argv[1] << "\n";
   std::cout << "output: " << output_file << "\n";
   std::cout << "nodes: " << g.nodes << "\n";
   std::cout << "edges: " << g.edges << "\n";
