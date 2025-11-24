@@ -14,6 +14,19 @@ Run: ./delta-stepping_omp internet.egr [output_file]
 #include <omp.h>
 #include "ECLgraph.h"
 
+// Helper function for atomic minimum
+inline int atomic_min(int* addr, int value) {
+    int old = *addr;
+    while (value < old) {
+        int prev;
+        #pragma omp atomic capture
+        { prev = *addr; *addr = std::min(*addr, value); }
+        if (prev <= value) break;
+        old = prev;
+    }
+    return old;
+}
+
 // Parallel Delta-Stepping using OpenMP
 void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
     int n = g.nodes;
@@ -28,6 +41,10 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
     // Create buckets (using sets for automatic sorting and uniqueness)
     int num_buckets = n + 1;
     std::vector<std::set<int>> buckets(num_buckets);
+    omp_lock_t* bucket_locks = new omp_lock_t[num_buckets];
+    for (int i = 0; i < num_buckets; i++) {
+        omp_init_lock(&bucket_locks[i]);
+    }
     buckets[0].insert(source);
 
     int current_bucket = 0;
@@ -64,13 +81,14 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
                     if (weight <= delta) {
                         int new_dist = dist[u] + weight;
                         
-                        #pragma omp critical
-                        {
-                            if (new_dist < dist[v]) {
-                                dist[v] = new_dist;
+                        if (new_dist < dist[v]) {
+                            int old = atomic_min(&dist[v], new_dist);
+                            if (new_dist < old) {
                                 int b = new_dist / delta;
                                 if (b < num_buckets) {
+                                    omp_set_lock(&bucket_locks[b]);
                                     buckets[b].insert(v);
+                                    omp_unset_lock(&bucket_locks[b]);
                                 }
                             }
                         }
@@ -97,13 +115,14 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
                 if (weight > delta) {
                     int new_dist = dist[u] + weight;
                     
-                    #pragma omp critical
-                    {
-                        if (new_dist < dist[v]) {
-                            dist[v] = new_dist;
+                    if (new_dist < dist[v]) {
+                        int old = atomic_min(&dist[v], new_dist);
+                        if (new_dist < old) {
                             int b = new_dist / delta;
                             if (b < num_buckets) {
+                                omp_set_lock(&bucket_locks[b]);
                                 buckets[b].insert(v);
+                                omp_unset_lock(&bucket_locks[b]);
                             }
                         }
                     }
@@ -113,22 +132,36 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta) {
 
         current_bucket++;
     }
+
+    // Cleanup locks
+    for (int i = 0; i < num_buckets; i++) {
+        omp_destroy_lock(&bucket_locks[i]);
+    }
+    delete[] bucket_locks;
 }
 
 int main(int argc, char* argv[]) {
     // check command line
-    if (argc != 2 && argc != 3) {
-        std::cerr << "USAGE: " << argv[0] << " input_file [output_file]\n";
+    if (argc != 3 && argc != 4) {
+        std::cerr << "USAGE: " << argv[0] << " num_threads input_file [output_file]\n";
         exit(-1);
     }
 
-    std::string output_file = (argc == 3)
-        ? std::string("results/") + argv[2]
+    // Set number of threads
+    int num_threads = atoi(argv[1]);
+    if (num_threads < 1) {
+        std::cerr << "ERROR: num_threads must be at least 1\n";
+        exit(-1);
+    }
+    omp_set_num_threads(num_threads);
+
+    std::string output_file = (argc == 4)
+        ? std::string("results/") + argv[3]
         : "results/delta_stepping_omp_results.txt";
 
     // read input
-    ECLgraph g = readECLgraph(argv[1]);
-    std::cout << "input: " << argv[1] << "\n";
+    ECLgraph g = readECLgraph(argv[2]);
+    std::cout << "input: " << argv[2] << "\n";
     std::cout << "output: " << output_file << "\n";
     std::cout << "nodes: " << g.nodes << "\n";
     std::cout << "edges: " << g.edges << "\n";

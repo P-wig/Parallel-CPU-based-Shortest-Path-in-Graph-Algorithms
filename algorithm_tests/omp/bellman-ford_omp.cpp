@@ -8,10 +8,25 @@ Run: ./bellman-ford_omp internet.egr [output_file]
 #include <fstream>
 #include <climits>
 #include <chrono>
+#include <cstring>
+#include <algorithm>
 #include <omp.h>
 #include "ECLgraph.h"
 
-// Parallel Bellman-Ford using OpenMP
+// Helper function for atomic minimum
+inline int atomic_min(int* addr, int value) {
+    int old = *addr;
+    while (value < old) {
+        int prev;
+        #pragma omp atomic capture
+        { prev = *addr; *addr = std::min(*addr, value); }
+        if (prev <= value) break;
+        old = prev;
+    }
+    return old;
+}
+
+// Parallel Bellman-Ford using OpenMP (optimized)
 bool bellman_ford_omp(const ECLgraph& g, int source, int* dist) {
     int n = g.nodes;
     
@@ -26,8 +41,17 @@ bool bellman_ford_omp(const ECLgraph& g, int source, int* dist) {
     for (int iter = 1; iter < n; iter++) {
         bool changed = false;
         
+        // Create a temporary array for this iteration
+        int* new_dist = new int[n];
+        
+        // Copy current distances
+        #pragma omp parallel for
+        for (int i = 0; i < n; i++) {
+            new_dist[i] = dist[i];
+        }
+        
         // Parallelize edge relaxation across all nodes
-        #pragma omp parallel for reduction(||:changed)
+        #pragma omp parallel for schedule(dynamic, 256) reduction(||:changed)
         for (int u = 0; u < n; u++) {
             if (dist[u] != INT_MAX) {
                 int start = g.nindex[u];
@@ -35,62 +59,55 @@ bool bellman_ford_omp(const ECLgraph& g, int source, int* dist) {
                 for (int i = start; i < end; i++) {
                     int v = g.nlist[i];
                     int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
-                    int new_dist = dist[u] + weight;
+                    int new_dist_val = dist[u] + weight;
                     
-                    if (new_dist < dist[v]) {
-                        #pragma omp critical
-                        {
-                            if (new_dist < dist[v]) {
-                                dist[v] = new_dist;
-                                changed = true;
-                            }
+                    if (new_dist_val < new_dist[v]) {
+                        int old = atomic_min(&new_dist[v], new_dist_val);
+                        if (new_dist_val < old) {
+                            changed = true;
                         }
                     }
                 }
             }
         }
         
+        // Copy new distances back
+        #pragma omp parallel for
+        for (int i = 0; i < n; i++) {
+            dist[i] = new_dist[i];
+        }
+        
+        delete[] new_dist;
+        
         // Early exit if no changes
         if (!changed) break;
     }
 
-    // Check for negative cycles (optional)
-    /*
-    bool negative_cycle = false;
-    #pragma omp parallel for reduction(||:negative_cycle)
-    for (int u = 0; u < n; u++) {
-        if (dist[u] != INT_MAX) {
-            int start = g.nindex[u];
-            int end = g.nindex[u + 1];
-            for (int i = start; i < end; i++) {
-                int v = g.nlist[i];
-                int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
-                if (dist[u] + weight < dist[v]) {
-                    negative_cycle = true;
-                }
-            }
-        }
-    }
-    return !negative_cycle;
-    */
-    
     return true;
 }
 
 int main(int argc, char* argv[]) {
     // check command line
-    if (argc != 2 && argc != 3) {
-        std::cerr << "USAGE: " << argv[0] << " input_file [output_file]\n";
+    if (argc != 3 && argc != 4) {
+        std::cerr << "USAGE: " << argv[0] << " num_threads input_file [output_file]\n";
         exit(-1);
     }
 
-    std::string output_file = (argc == 3)
-        ? std::string("results/") + argv[2]
+    // Set number of threads
+    int num_threads = atoi(argv[1]);
+    if (num_threads < 1) {
+        std::cerr << "ERROR: num_threads must be at least 1\n";
+        exit(-1);
+    }
+    omp_set_num_threads(num_threads);
+
+    std::string output_file = (argc == 4)
+        ? std::string("results/") + argv[3]
         : "results/bellman_ford_omp_results.txt";
 
     // read input
-    ECLgraph g = readECLgraph(argv[1]);
-    std::cout << "input: " << argv[1] << "\n";
+    ECLgraph g = readECLgraph(argv[2]);
+    std::cout << "input: " << argv[2] << "\n";
     std::cout << "output: " << output_file << "\n";
     std::cout << "nodes: " << g.nodes << "\n";
     std::cout << "edges: " << g.edges << "\n";

@@ -1,7 +1,7 @@
 /*
 Compile: g++ -fopenmp -O3 -I../.. -static -o dijkstra_omp dijkstra_omp.cpp
 
-Run: ./dijkstra_omp internet.egr [output_file]
+Run: ./dijkstra_omp num_threads input_file [output_file]
 */
 
 #include <iostream>
@@ -55,18 +55,26 @@ static void dijkstra_omp(const ECLgraph& g, int source, int* dist) {
 
 int main(int argc, char* argv[]) {
   // check command line
-  if (argc != 2 && argc != 3) {
-    std::cerr << "USAGE: " << argv[0] << " input_file [output_file]\n";
+  if (argc != 3 && argc != 4) {
+    std::cerr << "USAGE: " << argv[0] << " num_threads input_file [output_file]\n";
     exit(-1);
   }
 
-  std::string output_file = (argc == 3)
-      ? std::string("results/") + argv[2]
+  // Set number of threads
+  int num_threads = atoi(argv[1]);
+  if (num_threads < 1) {
+    std::cerr << "ERROR: num_threads must be at least 1\n";
+    exit(-1);
+  }
+  omp_set_num_threads(num_threads);
+
+  std::string output_file = (argc == 4)
+      ? std::string("results/") + argv[3]
       : "results/dijkstra_omp_results.txt";
 
   // read input
-  ECLgraph g = readECLgraph(argv[1]);
-  std::cout << "input: " << argv[1] << "\n";
+  ECLgraph g = readECLgraph(argv[2]);
+  std::cout << "input: " << argv[2] << "\n";
   std::cout << "output: " << output_file << "\n";
   std::cout << "nodes: " << g.nodes << "\n";
   std::cout << "edges: " << g.edges << "\n";
