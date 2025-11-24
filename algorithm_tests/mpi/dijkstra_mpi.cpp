@@ -1,6 +1,6 @@
 /*
 Compile: mpic++ -std=c++17 -O2 -I. -o algorithm_tests/mpi/dijkstra_mpi algorithm_tests/mpi/dijkstra_mpi.cpp
-Run: mpiexec -n 4 ./algorithm_tests/mpi/dijkstra_mpi internet.egr sssp_results.txt
+Run: mpiexec -n 4 ./algorithm_tests/mpi/dijkstra_mpi internet.egr
 */
 
 /*
@@ -98,16 +98,14 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    if (argc != 2 && argc != 3) {
+    if (argc != 2) {
         if (rank == 0)
-            std::cerr << "USAGE: " << argv[0] << " input_file [output_file]\n";
+            std::cerr << "USAGE: " << argv[0] << " input_file\n";
         MPI_Finalize();
         return -1;
     }
 
-    std::string output_file = (argc == 3)
-        ? std::string("algorithm_tests/mpi/results/") + argv[2]
-        : "algorithm_tests/mpi/results/dijkstra_mpi_results.txt";
+    std::string output_file = "algorithm_tests/mpi/results/dijkstra_mpi_results.txt";
 
     // Only rank 0 reads the graph
     ECLgraph g;
