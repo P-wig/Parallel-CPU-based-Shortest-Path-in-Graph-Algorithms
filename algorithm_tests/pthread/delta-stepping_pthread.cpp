@@ -250,13 +250,7 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < g.nodes; i++) dist[i] = INT_MAX;
     dist[source] = 0;
 
-    int max_dist = 0;
-    if (g.eweight != NULL) {
-        for (int i = 0; i < g.edges; i++) max_dist += g.eweight[i];
-    } else {
-        max_dist = g.edges;
-    }
-    bucket_count = max_dist / delta + 2;
+    bucket_count = 8;
     buckets.resize(bucket_count);
     local_buckets.resize(threads);
     for (int t = 0; t < threads; t++)
