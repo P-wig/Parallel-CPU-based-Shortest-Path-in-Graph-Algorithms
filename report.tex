@@ -13,6 +13,8 @@
 \usepackage{natbib}
 \usepackage{doi}
 \usepackage{fancyhdr}
+\usepackage{tikz}
+\usepackage{pgfplots}
 
 \title{Parallel-CPU-based-Shortest-Path-in-Graph-Algorithms}
 \date{December 1, 2025}
@@ -91,9 +93,42 @@ This approach can handle negative edge weights and is capable of detecting negat
 
 \textbf{Delta-Stepping} was implemented as a bucket-based algorithm, dividing nodes into buckets according to their tentative distances. 
 The algorithm alternates between relaxing "light" edges (with weights less than or equal to a chosen $\delta$ parameter) and "heavy" edges (with weights greater than $\delta$). 
-The $\delta$ parameter was set to ten times the average edge weight of the input graph ($\delta = 10 \times \text{avg. edge weight}$) for all experiments, as this value provided a good balance between parallelism and synchronization overhead in practice.
+The $\delta$ parameter was set to ten times the average edge weight of the input graph ($\delta = 10 \times \text{avg. edge weight}$) for all experiments, as this value provided balance between parallelism and synchronization overhead in practice.
 
-All sequential implementations read the input graph in DIMACS format, computed shortest path distances from a designated source node (node 0), and wrote the results to a standardized output file. These baseline results were used to validate the correctness of the parallel implementations and to provide a point of comparison for evaluating speedup and scalability.
+To compare the baseline performance of the three algorithms, we measured the runtime of each sequential implementation on the \texttt{internet.egr} graph. The results are shown in Figure~\ref{fig:seq-sssp-times}.
+\begin{figure}[ht]
+    \centering
+    \begin{tikzpicture}
+        \begin{axis}[
+            ybar,
+            bar width=20pt,
+            ylabel={Runtime (seconds)},
+            symbolic x coords={Dijkstra, Bellman-Ford, Delta-Stepping},
+            xtick=data,
+            xtick style={draw=none},
+            xticklabels={},
+            nodes near coords,
+            ymin=0,
+            width=0.7\textwidth,
+            height=0.5\textwidth,
+            enlarge x limits=0.3,
+            legend style={at={(0.02,0.98)},anchor=north west}
+        ]
+        \addplot+[ybar, fill=blue!70!black] coordinates {(Dijkstra, 0.0194)};
+        \addplot+[ybar, fill=red!70!black] coordinates {(Bellman-Ford, 0.0351)};
+        \addplot+[ybar, fill=green!70!black] coordinates {(Delta-Stepping, 0.1788)};
+        \legend{Dijkstra, Bellman-Ford, Delta-Stepping}
+        \end{axis}
+    \end{tikzpicture}
+    \caption{Sequential runtime comparison of Dijkstra, Bellman-Ford, and Delta-Stepping algorithms on the \texttt{internet.egr} graph.}
+    \label{fig:seq-sssp-times}
+\end{figure}
+
+As shown in Figure~\ref{fig:seq-sssp-times}, Dijkstra's algorithm achieved the fastest sequential runtime, followed by Bellman-Ford, with Delta-Stepping being the slowest. 
+This ordering is expected, Dijkstra's algorithm is highly efficient for graphs with non-negative edge weights due to its use of a priority queue and greedy selection of the minimum-distance nodes. 
+While Bellman-Ford is more flexible in handling negative weights, it incurs additional overhead computation by relaxing all edges in each iteration. 
+Although Delta-Stepping is designed for parallel efficiency, it introduces extra overhead in the sequential case from managing buckets and additional data structures, which makes it less efficient than the other two algorithms when run on a single thread. 
+These results provide a baseline for evaluating the impact of parallelization in the following sections.
 
 \section{Results}
 % Experimental results, tables, and figures.

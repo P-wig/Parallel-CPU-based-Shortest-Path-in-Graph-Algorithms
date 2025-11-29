@@ -1,4 +1,4 @@
-//compile: g++ -std=c++17 -O2 -I. -o benchmark/benchmark benchmark/benchmark.cpp
+//compile: g++ -std=c++17 -O2 -I. -o benchmark/benchmark benchmark/dijkstra.cpp
 //run: ./benchmark/benchmark internet.egr sssp_results.txt
 
 #include <iostream>
