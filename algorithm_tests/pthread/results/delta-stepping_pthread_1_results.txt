@@ -5,15 +5,18 @@ nodes: 124651
 edges: 387240
 graph has edge weights
 pthreads used: 1
-delta: 1000
+delta: 500
 
-compute time: 0.2488 s
+compute time: 0.24 s
 Results written to algorithm_tests/pthread/results/delta-stepping_pthread_results.txt
 Global max shortest-path: 6836
 Reachable nodes from source: 124651
 Per-bucket finalized node counts:
-Bucket 0: finalized 124057 nodes
-Bucket 1: finalized 558 nodes
-Bucket 2: finalized 34 nodes
-Bucket 5: finalized 1 nodes
-Bucket 6: finalized 1 nodes
+Bucket 0: finalized 122363 nodes
+Bucket 1: finalized 1694 nodes
+Bucket 2: finalized 71 nodes
+Bucket 3: finalized 487 nodes
+Bucket 4: finalized 28 nodes
+Bucket 5: finalized 6 nodes
+Bucket 10: finalized 1 nodes
+Bucket 13: finalized 1 nodes

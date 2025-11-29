@@ -3,9 +3,9 @@ output: algorithm_tests/mpi/results/delta_stepping_mpi_results.txt
 nodes: 124651
 edges: 387240
 graph has edge weights
-delta (bucket width) chosen: 1000
+delta (bucket width) chosen: 500
 MPI ranks used: 16
 
-compute time: 3.10734 s
+compute time: 4.31936 s
 Results written to algorithm_tests/mpi/results/delta_stepping_mpi_results.txt
 Global max shortest-path: 6836
