@@ -1,0 +1,10 @@
+input: internet.egr
+output: algorithm_tests/mpi/results/dijkstra_mpi_results.txt
+nodes: 124651
+edges: 387240
+graph has edge weights
+MPI ranks used: 8
+
+compute time: 182.909 s
+Results written to algorithm_tests/mpi/results/dijkstra_mpi_results.txt
+Global max shortest-path: 6836

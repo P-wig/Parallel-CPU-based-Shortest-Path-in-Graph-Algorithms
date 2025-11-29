@@ -1,0 +1,11 @@
+Single-Source Shortest Path using Bellman-Ford with MPI
+input: internet.egr
+output: algorithm_tests/mpi/results/bellman_ford_mpi_results.txt
+nodes: 124651
+edges: 387240
+graph has edge weights
+MPI ranks used: 8
+
+compute time: 0.0245575 s
+Results written to algorithm_tests/mpi/results/bellman_ford_mpi_results.txt
+Global max shortest-path: 6836

@@ -1,0 +1,11 @@
+Single-Source Shortest Path using Bellman-Ford with pthreads
+input: ../../internet.egr
+output: algorithm_tests/pthread/results/bellman_ford_pthread_results.txt
+nodes: 124651
+edges: 387240
+graph has edge weights
+pthreads used: 16
+
+compute time: 0.0143651 s
+Results written to algorithm_tests/pthread/results/bellman_ford_pthread_results.txt
+Global max shortest-path: 6836

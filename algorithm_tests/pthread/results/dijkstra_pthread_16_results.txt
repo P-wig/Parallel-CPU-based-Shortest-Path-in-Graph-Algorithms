@@ -1,0 +1,12 @@
+Single-Source Shortest Path using Dijkstra with pthreads (clean C-style)
+input: ../../internet.egr
+output: algorithm_tests/pthread/results/dijkstra_pthread_results.txt
+nodes: 124651
+edges: 387240
+graph has edge weights
+pthreads used: 16
+
+compute time: 48.9104 s
+Results written to algorithm_tests/pthread/results/dijkstra_pthread_results.txt
+Global max shortest-path: 6836
+Reachable nodes from source: 124651

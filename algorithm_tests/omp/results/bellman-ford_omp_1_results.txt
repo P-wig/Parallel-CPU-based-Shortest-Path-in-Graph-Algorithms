@@ -1,0 +1,10 @@
+input: ../../internet.egr
+output: results/bellman_ford_omp_results.txt
+nodes: 124651
+edges: 387240
+graph has edge weights
+OpenMP threads: 1
+
+compute time: 0.0663812 s
+Results written to results/bellman_ford_omp_results.txt
+Global max shortest-path: 6836

@@ -1,0 +1,19 @@
+Single-Source Shortest Path using Delta-Stepping with pthreads
+input: ../../internet.egr
+output: algorithm_tests/pthread/results/delta-stepping_pthread_results.txt
+nodes: 124651
+edges: 387240
+graph has edge weights
+pthreads used: 1
+delta: 1000
+
+compute time: 0.2488 s
+Results written to algorithm_tests/pthread/results/delta-stepping_pthread_results.txt
+Global max shortest-path: 6836
+Reachable nodes from source: 124651
+Per-bucket finalized node counts:
+Bucket 0: finalized 124057 nodes
+Bucket 1: finalized 558 nodes
+Bucket 2: finalized 34 nodes
+Bucket 5: finalized 1 nodes
+Bucket 6: finalized 1 nodes
