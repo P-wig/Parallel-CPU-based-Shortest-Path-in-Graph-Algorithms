@@ -123,7 +123,7 @@ int main(int argc, char* argv[]) {
     auto beg = std::chrono::high_resolution_clock::now();
 
     int source = 0;
-    int delta = std::max(1, average_edge_weight); // Use average edge weight for delta
+    int delta = 500;
     std::cout << "delta (bucket width) chosen: " << delta << "\n";
     delta_stepping(g, source, dist, delta);
 

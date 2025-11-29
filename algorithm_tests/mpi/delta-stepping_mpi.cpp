@@ -37,7 +37,7 @@ void delta_stepping_mpi(const ECLgraph& g, int source, std::vector<int>& dist, i
     dist.assign(n, INT_MAX);
     dist[source] = 0;
 
-    int bucket_count = 8;
+    int bucket_count = 300;
     std::vector<std::set<int>> buckets(bucket_count);
     if (rank == 0) buckets[0].insert(source);
 
@@ -248,7 +248,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Set delta to average edge weight
-    int delta = 1000;
+    int delta = 500;
 
     if (rank == 0) {
         console_out.open(console_file);
