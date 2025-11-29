@@ -47,7 +47,7 @@ void delta_stepping_omp(const ECLgraph& g, int source, int* dist, int delta, int
     } else {
         max_dist = g.edges;
     }
-    int bucket_count = max_dist / delta + 2;
+    int bucket_count = 300;
 
     // Create global buckets and thread-local buckets
     std::vector<std::set<int>> buckets(bucket_count);
@@ -229,7 +229,7 @@ int main(int argc, char* argv[]) {
         console_out << "graph has no edge weights (using weight = 1)\n";
     }
 
-    int delta = 1000;
+    int delta = 500;
     console_out << "delta (bucket width) chosen: " << delta << "\n";
     console_out << "OpenMP threads: " << omp_get_max_threads() << "\n";
 

@@ -20,13 +20,13 @@
 % Uncomment to override  the `A preprint' in the header
 %\renewcommand{\headeright}{Technical Report}
 %\renewcommand{\undertitle}{Technical Report}
-\renewcommand{\shorttitle}{<Short Title>}
+\renewcommand{\shorttitle}{Parallel SSSP Algorithms}
 
 \hypersetup{
-pdftitle={Parallel-CPU-based-Shortest-Path-in-Graph-Algorithms},
-pdfsubject={},
-pdfauthor={<Your Name(s)>},
-pdfkeywords={},
+  pdftitle={Parallel-CPU-based-Shortest-Path-in-Graph-Algorithms},
+  pdfsubject={Parallel Algorithms, shortest path},
+  pdfauthor={Isaac Shepherd, <Coauthor Name>},
+  pdfkeywords={SSSP, Dijkstra, Bellman-Ford, Delta-Stepping, MPI, OpenMP, pthreads, Parallel Computing},
 }
 
 \author{
@@ -63,10 +63,37 @@ The goal is to evaluate the scalability and efficiency of each approach on the `
 These tests provide insights into the strengths and limitations of different parallelization strategies for high-performance graph processing.
 
 \section{Background}
-% Background and related work.
+
+The single-source shortest path (SSSP) problem is a foundational problem in graph theory, with applications ranging from network routing, transportation planning, and scientific simulations. 
+Given a weighted graph and a source node, the goal is to find the shortest path from the source to every other node in the graph.
+
+Several classic algorithms have been developed to solve the SSSP problem. 
+\textbf{Dijkstra's algorithm} is an aglorithm published in 1959 by Edsger W. Dijkstra, efficient for graphs with non-negative edge weights and is widely used due to its optimality and simplicity. 
+However, it is inherently sequential because it relies on selecting a global minimum distance node at each step. 
+\textbf{Bellman-Ford's algorithm} is an algorithm published in 1958 by Richard Bellman and Lester Ford that can handle graphs with negative edge weights and is more amenable to parallelization, as it relaxes all edges in each iteration. 
+\textbf{Delta-Stepping} is a more recent algorithm designed in 1998 by Ulrich Meyer and Peter Sanders, to combine the advantages of Dijkstra and Bellman-Ford, offering better parallel scalability by processing nodes in "buckets" based on distance ranges.
+
+With the increasing size of real-world graphs, parallel computing has become essential for practical SSSP computation. Three major parallel programming models are commonly used: 
+\textbf{MPI} (Message Passing Interface) for distributed-memory systems, \textbf{pthreads} for shared-memory multi-threading, and \textbf{OpenMP} for high-level shared-memory parallelism. 
+Each model presents unique challenges and opportunities for parallelizing SSSP algorithms.
+
+This project builds on these foundations by implementing and comparing Dijkstra, Bellman-Ford, and Delta-Stepping algorithms using MPI, pthreads, and OpenMP, and evaluating their performance on a large, real-world internet topology graph.
 
 \section{Methods}
-% Methods, algorithms, and implementation details.
+
+To establish a baseline for performance and correctness, we first implemented sequential versions of the three single-source shortest path algorithms: Dijkstra, Bellman-Ford, and Delta-Stepping. Each algorithm was written in C++ and tested on the same large DIMACS graph (`internet.egr`) to ensure consistent input and output formats across all experiments.
+
+\textbf{Dijkstra's algorithm} was implemented using a min-heap (priority queue) to select the node with the smallest tentative distance at each step. 
+This version is suitable for our graph with no negative edge weights, and serves as a reference for optimal sequential performance.
+
+\textbf{Bellman-Ford's algorithm} was implemented in its classic form, relaxing all edges in the graph for each of $(n-1)$ iterations, where $n$ is the number of nodes. 
+This approach can handle negative edge weights and is capable of detecting negative-weight cycles, however we omitted negative-weight cycle detection in our implementation as the input graph is known to have no such cycles.
+
+\textbf{Delta-Stepping} was implemented as a bucket-based algorithm, dividing nodes into buckets according to their tentative distances. 
+The algorithm alternates between relaxing "light" edges (with weights less than or equal to a chosen $\delta$ parameter) and "heavy" edges (with weights greater than $\delta$). 
+The $\delta$ parameter was set to ten times the average edge weight of the input graph ($\delta = 10 \times \text{avg. edge weight}$) for all experiments, as this value provided a good balance between parallelism and synchronization overhead in practice.
+
+All sequential implementations read the input graph in DIMACS format, computed shortest path distances from a designated source node (node 0), and wrote the results to a standardized output file. These baseline results were used to validate the correctness of the parallel implementations and to provide a point of comparison for evaluating speedup and scalability.
 
 \section{Results}
 % Experimental results, tables, and figures.

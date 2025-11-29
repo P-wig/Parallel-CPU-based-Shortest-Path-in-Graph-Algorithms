@@ -230,13 +230,13 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     threads = std::atoi(argv[2]);
-    delta = 1000;
+    delta = 500;
     if (threads < 1) {
         std::cerr << "ERROR: num_threads must be at least 1\n";
         return -1;
     }
     std::string output_file = "algorithm_tests/pthread/results/delta-stepping_pthread_results.txt";
-    std::string console_file = "results/delta-stepping_pthread_" + std::to_string(threads) + "_results.txt";
+    std::string console_file = "algorithm_tests/pthread/results/delta-stepping_pthread_" + std::to_string(threads) + "_results.txt";
     std::ofstream console_out(console_file);
     if (!console_out) {
         std::cerr << "ERROR: could not open console output file\n";
@@ -253,12 +253,13 @@ int main(int argc, char* argv[]) {
     else console_out << "graph has no edge weights (using weight = 1)\n";
     console_out << "pthreads used: " << threads << "\n";
     console_out << "delta: " << delta << "\n";
+    console_out.flush();
 
     dist = new std::atomic<int>[g.nodes];
     for (int i = 0; i < g.nodes; i++) dist[i] = INT_MAX;
     dist[source] = 0;
 
-    bucket_count = 8;
+    bucket_count = 300;
     buckets.resize(bucket_count);
     local_buckets.resize(threads);
     for (int t = 0; t < threads; t++)
@@ -285,6 +286,7 @@ int main(int argc, char* argv[]) {
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> runtime = end - beg;
     console_out << "\ncompute time: " << runtime.count() << " s\n";
+    console_out.flush();
 
     std::ofstream outfile(output_file);
     if (!outfile) {
@@ -305,14 +307,18 @@ int main(int argc, char* argv[]) {
     }
     outfile.close();
     console_out << "Results written to " << output_file << "\n";
+    console_out.flush();
     console_out << "Global max shortest-path: ";
+    console_out.flush();
     if (global_max_path == INT_MIN) console_out << "None found\n";
     else console_out << global_max_path << "\n";
+    console_out.flush();
     int reachable = 0;
     for (int i = 0; i < g.nodes; i++) {
         if (dist[i] != INT_MAX) reachable++;
     }
     console_out << "Reachable nodes from source: " << reachable << "\n";
+    console_out.flush();
 
     // After all threads complete, in main()
     console_out << "Per-bucket finalized node counts:\n";
@@ -320,6 +326,7 @@ int main(int argc, char* argv[]) {
         if (finalized_per_bucket[b] > 0)
             console_out << "Bucket " << b << ": finalized " << finalized_per_bucket[b] << " nodes\n";
     }
+    console_out.flush();
     console_out.close();
 
     pthread_barrier_destroy(&barrier);
