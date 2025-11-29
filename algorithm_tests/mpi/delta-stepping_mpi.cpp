@@ -218,6 +218,8 @@ int main(int argc, char* argv[]) {
     }
 
     std::string output_file = "algorithm_tests/mpi/results/delta_stepping_mpi_results.txt";
+    std::string console_file = "algorithm_tests/mpi/results/delta-stepping_mpi_" + std::to_string(size) + "_results.txt";
+    std::ofstream console_out;
 
     // Only rank 0 reads the graph
     ECLgraph g;
@@ -249,14 +251,20 @@ int main(int argc, char* argv[]) {
     int delta = 1000;
 
     if (rank == 0) {
-        std::cout << "input: " << argv[1] << "\n";
-        std::cout << "output: " << output_file << "\n";
-        std::cout << "nodes: " << g.nodes << "\n";
-        std::cout << "edges: " << g.edges << "\n";
-        if (g.eweight != nullptr) std::cout << "graph has edge weights\n";
-        else std::cout << "graph has no edge weights (using weight = 1)\n";
-        std::cout << "delta (bucket width) chosen: " << delta << "\n";
-        std::cout << "MPI ranks used: " << size << "\n";
+        console_out.open(console_file);
+        if (!console_out) {
+            std::cerr << "ERROR: could not open console output file\n";
+            MPI_Finalize();
+            return -1;
+        }
+        console_out << "input: " << argv[1] << "\n";
+        console_out << "output: " << output_file << "\n";
+        console_out << "nodes: " << g.nodes << "\n";
+        console_out << "edges: " << g.edges << "\n";
+        if (g.eweight != nullptr) console_out << "graph has edge weights\n";
+        else console_out << "graph has no edge weights (using weight = 1)\n";
+        console_out << "delta (bucket width) chosen: " << delta << "\n";
+        console_out << "MPI ranks used: " << size << "\n";
     }
 
     std::vector<int> dist(g.nodes, INT_MAX);
@@ -291,11 +299,12 @@ int main(int argc, char* argv[]) {
             }
         }
         outfile.close();
-        std::cout << "\ncompute time: " << runtime.count() << " s\n";
-        std::cout << "Results written to " << output_file << "\n";
-        std::cout << "Global max shortest-path: ";
-        if (global_max_path == INT_MIN) std::cout << "None found\n";
-        else std::cout << global_max_path << "\n";
+        console_out << "\ncompute time: " << runtime.count() << " s\n";
+        console_out << "Results written to " << output_file << "\n";
+        console_out << "Global max shortest-path: ";
+        if (global_max_path == INT_MIN) console_out << "None found\n";
+        else console_out << global_max_path << "\n";
+        console_out.close();
     }
 
     freeECLgraph(g);

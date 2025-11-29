@@ -107,19 +107,25 @@ int main(int argc, char* argv[]) {
     std::string output_file = (argc == 4)
         ? std::string("results/") + argv[3]
         : "results/bellman_ford_omp_results.txt";
-
-    std::cout << "input: " << argv[1] << "\n";
-    std::cout << "output: " << output_file << "\n";
-    std::cout << "nodes: " << g.nodes << "\n";
-    std::cout << "edges: " << g.edges << "\n";
-
-    if (g.eweight != NULL) {
-        std::cout << "graph has edge weights\n";
-    } else {
-        std::cout << "graph has no edge weights (using weight = 1)\n";
+    std::string console_file = "results/bellman-ford_omp_" + std::to_string(num_threads) + "_results.txt";
+    std::ofstream console_out(console_file);
+    if (!console_out) {
+        std::cerr << "ERROR: could not open console output file\n";
+        exit(-1);
     }
 
-    std::cout << "OpenMP threads: " << omp_get_max_threads() << "\n";
+    console_out << "input: " << argv[1] << "\n";
+    console_out << "output: " << output_file << "\n";
+    console_out << "nodes: " << g.nodes << "\n";
+    console_out << "edges: " << g.edges << "\n";
+
+    if (g.eweight != NULL) {
+        console_out << "graph has edge weights\n";
+    } else {
+        console_out << "graph has no edge weights (using weight = 1)\n";
+    }
+
+    console_out << "OpenMP threads: " << omp_get_max_threads() << "\n";
 
     // allocate distance array
     int* dist = new int[g.nodes];
@@ -162,15 +168,16 @@ int main(int argc, char* argv[]) {
     }
     outfile.close();
 
-    if (!ok) std::cout << "WARNING: Negative-weight cycle detected!\n";
-    std::cout << "\ncompute time: " << runtime.count() << " s\n";
-    std::cout << "Results written to " << output_file << "\n";
-    std::cout << "Global max shortest-path: ";
+    if (!ok) console_out << "WARNING: Negative-weight cycle detected!\n";
+    console_out << "\ncompute time: " << runtime.count() << " s\n";
+    console_out << "Results written to " << output_file << "\n";
+    console_out << "Global max shortest-path: ";
     if (global_max_path == INT_MIN) {
-        std::cout << "None found\n";
+        console_out << "None found\n";
     } else {
-        std::cout << global_max_path << "\n";
+        console_out << global_max_path << "\n";
     }
+    console_out.close();
 
     // clean up
     delete[] dist;

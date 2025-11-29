@@ -102,15 +102,22 @@ int main(int argc, char* argv[]) {
     }
 
     std::string output_file = "algorithm_tests/pthread/results/dijkstra_pthread_results.txt";
+    std::string console_file = "results/dijkstra_pthread_" + std::to_string(threads) + "_results.txt";
+    std::ofstream console_out(console_file);
+    if (!console_out) {
+        std::cerr << "ERROR: could not open console output file\n";
+        return -1;
+    }
 
     g = readECLgraph(argv[1]);
-    std::cout << "input: " << argv[1] << "\n";
-    std::cout << "output: " << output_file << "\n";
-    std::cout << "nodes: " << g.nodes << "\n";
-    std::cout << "edges: " << g.edges << "\n";
-    if (g.eweight != NULL) std::cout << "graph has edge weights\n";
-    else std::cout << "graph has no edge weights (using weight = 1)\n";
-    std::cout << "pthreads used: " << threads << "\n";
+    console_out << "Single-Source Shortest Path using Dijkstra with pthreads (clean C-style)\n";
+    console_out << "input: " << argv[1] << "\n";
+    console_out << "output: " << output_file << "\n";
+    console_out << "nodes: " << g.nodes << "\n";
+    console_out << "edges: " << g.edges << "\n";
+    if (g.eweight != NULL) console_out << "graph has edge weights\n";
+    else console_out << "graph has no edge weights (using weight = 1)\n";
+    console_out << "pthreads used: " << threads << "\n";
 
     dist = new int[g.nodes];
     visited = new bool[g.nodes];
@@ -138,11 +145,12 @@ int main(int argc, char* argv[]) {
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> runtime = end - beg;
-    std::cout << "\ncompute time: " << runtime.count() << " s\n";
+    console_out << "\ncompute time: " << runtime.count() << " s\n";
 
     std::ofstream outfile(output_file);
     if (!outfile) {
         std::cerr << "ERROR: could not open output file\n";
+        console_out.close();
         return -1;
     }
 
@@ -160,16 +168,17 @@ int main(int argc, char* argv[]) {
     }
     outfile.close();
 
-    std::cout << "Results written to " << output_file << "\n";
-    std::cout << "Global max shortest-path: ";
-    if (global_max_path == INT_MIN) std::cout << "None found\n";
-    else std::cout << global_max_path << "\n";
+    console_out << "Results written to " << output_file << "\n";
+    console_out << "Global max shortest-path: ";
+    if (global_max_path == INT_MIN) console_out << "None found\n";
+    else console_out << global_max_path << "\n";
 
     int reachable = 0;
     for (int i = 0; i < g.nodes; i++) {
         if (dist[i] != INT_MAX) reachable++;
     }
-    std::cout << "Reachable nodes from source: " << reachable << "\n";
+    console_out << "Reachable nodes from source: " << reachable << "\n";
+    console_out.close();
 
     pthread_barrier_destroy(&barrier);
     delete[] handles;
