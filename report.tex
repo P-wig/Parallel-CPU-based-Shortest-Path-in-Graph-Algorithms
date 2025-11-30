@@ -147,8 +147,7 @@ Delta-Stepping & 0.1966 & 0.2814 & 0.3199 & 0.3728 \\
 \end{table}
 
 The OpenMP results reveal distinct scalability patterns across the three algorithms. 
-\textbf{Dijkstra's algorithm} shows minimal improvement with additional threads, achieving only a modest 13\% speedup from 1 to 16 threads. This limited scalability is expected given Dijkstra's inherently sequential nature. The algorithm requires selecting the global minimum-distance node at each step, creating a serialization bottleneck that prevents effective parallelization. 
-The slight improvement at 16 threads may be attributed to better cache utilization during the initialization phase.
+\textbf{Dijkstra's algorithm} shows minimal improvement with additional threads, achieving only a modest 13\% speedup from 1 to 16 threads. This limited scalability is expected given Dijkstra's inherently sequential nature. The algorithm requires selecting the global minimum-distance node at each step, creating a serialization bottleneck that prevents effective parallelization. The slight improvement at 16 threads may be attributed to better cache utilization during the initialization phase.
 
 \textbf{Bellman-Ford} demonstrates good scaling behavior, achieving a 2.6× speedup with 16 threads. 
 The algorithm's structure, relaxing all edges in parallel during each iteration, is well-suited to OpenMP's work-sharing constructs. 
@@ -244,8 +243,8 @@ Figure 2 shows the speedup curves for each algorithm across the three paralleliz
             legend pos=north west,
             ymajorgrids=true,
             grid style=dashed,
-            width=0.85\textwidth,
-            height=0.6\textwidth,
+            width=\textwidth,
+            height=0.8\textwidth,
         ]
         
         % Ideal speedup
@@ -329,8 +328,8 @@ This property makes it difficult for bucket-based algorithms to expose sufficien
 This comparative study evaluated three single-source shortest path algorithms (Dijkstra, Bellman-Ford, and Delta-Stepping) across three parallel programming models: OpenMP, pthreads, and MPI on the DIMACS \texttt{internet.egr} graph (124,651 nodes, 387,240 edges).
 
 Our results demonstrate that algorithm selection dominates framework choice for parallel SSSP performance. 
-Bellman-Ford's edge-centric relaxation pattern achieved strong scalability (4.2× speedup with pthreads, 2.6× with OpenMP), while Dijkstra's inherently sequential structure and Delta-Stepping's synchronization overhead exhibited poor or negative scaling across all frameworks. 
-Shared-memory parallelism significantly outperformed distributed-memory approaches, with MPI suffering from communication overhead that caused up to 65× slowdown for Dijkstra and 14.6× for Delta-Stepping. 
+Bellman-Ford's edge-centric relaxation pattern achieved strong scalability, with a speedup of 4.2 using pthreads and 2.6 using OpenMP, while Dijkstra's inherently sequential structure and Delta-Stepping's synchronization overhead exhibited poor or negative scaling across all frameworks.
+Shared-memory parallelism significantly outperformed distributed-memory approaches, with MPI suffering from communication overhead that caused up to a 65-fold slowdown for Dijkstra and a 14.6-fold slowdown for Delta-Stepping.
 Pthread implementations generally outperformed OpenMP, particularly for Bellman-Ford, demonstrating the value of explicit thread control for performance-critical applications.
 
 For those working with parallel algorithms, we recommend using Bellman-Ford with pthreads or OpenMP for shared-memory systems, avoiding MPI for single-node deployments, and considering sequential or GPU-accelerated implementations for Dijkstra. 
