@@ -149,13 +149,13 @@ Delta-Stepping & 0.1966 & 0.2814 & 0.3199 & 0.3728 \\
 The OpenMP results reveal distinct scalability patterns across the three algorithms. 
 \textbf{Dijkstra's algorithm} shows minimal improvement with additional threads, achieving only a modest 13\% speedup from 1 to 16 threads. This limited scalability is expected given Dijkstra's inherently sequential nature. The algorithm requires selecting the global minimum-distance node at each step, creating a serialization bottleneck that prevents effective parallelization. The slight improvement at 16 threads may be attributed to better cache utilization during the initialization phase.
 
-\textbf{Bellman-Ford} demonstrates good scaling behavior, achieving a 2.6× speedup with 16 threads. 
+\textbf{Bellman-Ford} demonstrates good scaling behavior, achieving a 2.6 times speedup with 16 threads. 
 The algorithm's structure, relaxing all edges in parallel during each iteration, is well-suited to OpenMP's work-sharing constructs. 
 Our implementation uses atomic operations for thread-safe distance updates, avoiding the overhead of critical sections while maintaining correctness. 
 The diminishing returns beyond 8 threads suggest that synchronization costs and memory contention begin to offset the benefits of additional parallelism.
 
 \textbf{Delta-Stepping} exhibits unexpected \textit{negative scaling}, where performance degrades as more threads are added. 
-With 16 threads, the algorithm runs 1.9× \textit{slower} than the single-threaded version. 
+With 16 threads, the algorithm runs 1.9 times \textit{slower} than the single-threaded version. 
 This counterintuitive result can be attributed to the high synchronization overhead inherent in the bucket-based approach. 
 Each bucket processing phase requires a barrier synchronization, and with $\delta = 500$, the algorithm creates frequent synchronization points. 
 Additionally, the thread-local bucket merging strategy introduces contention when multiple threads attempt to insert nodes into shared buckets.
