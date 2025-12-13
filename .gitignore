@@ -8,6 +8,8 @@
 *.a
 *.lib
 
+*.txt
+
 # CMake build folders
 /build/
 [Cc]MakeCache.txt

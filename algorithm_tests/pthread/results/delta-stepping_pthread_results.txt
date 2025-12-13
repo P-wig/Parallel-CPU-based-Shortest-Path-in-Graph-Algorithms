@@ -1,5 +1,4 @@
 # Single-Source Shortest Path from node 0
-# Format: target_node distance
 0 0
 1 42
 2 37
