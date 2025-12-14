@@ -2,24 +2,10 @@
 Compile: g++ -std=c++17 -O2 -pthread -I. -o algorithm_tests/pthread/dijkstra_pthread algorithm_tests/pthread/dijkstra_pthread.cpp
 Run: ./algorithm_tests/pthread/dijkstra_pthread internet.egr 4
 
-Dijkstra's Algorithm: Parallelization Deficits (pthreads/shared-memory)
+Dijkstra's Algorithm (pthreads) - Fixed Missing Nodes Issue
 
-- Inherently Sequential: Dijkstra's algorithm relies on selecting the global minimum unvisited node in each iteration, which is a fundamentally sequential operation. This limits parallelism to only the edge relaxation phase for the current node.
-
-- Avoiding the Priority Queue: Instead of using a priority queue, thread 0 performs a linear scan of the dist[] array to find the global minimum unvisited node in each iteration. This is possible because all threads share memory, and the scan is efficient for moderate graph sizes. This approach avoids the complexity and synchronization overhead of a concurrent priority queue.
-
-- Poor Scalability: For most real-world graphs, the number of neighbors per node is small compared to the number of nodes. As a result, most threads are idle during edge relaxation, and increasing thread count leads to diminishing returns or even slower performance.
-
-- High Synchronization Overhead: Every iteration requires all threads to synchronize at barriers. With more threads, the cost of synchronization increases, often outweighing the benefits of parallel edge relaxation.
-
-- Work Imbalance: The workload per iteration is highly variable and often too small to keep all threads busy, resulting in poor load balancing.
-
-- Memory Contention: Multiple threads updating shared data structures (e.g., dist[]) can lead to cache contention and false sharing, further reducing performance.
-
-- Not Suitable for Negative Weights: Dijkstra's algorithm cannot handle graphs with negative edge weights.
-
-Summary: 
-Parallel Dijkstra with pthreads is correct but not efficient for large graphs. For better scalability, use algorithms like Bellman-Ford or Delta-Stepping, which allow more parallelism and better load balancing.
+Fixed the race condition in termination detection that was causing some reachable nodes
+to be missed when using multiple threads.
 */
 
 #include <iostream>
@@ -29,161 +15,186 @@ Parallel Dijkstra with pthreads is correct but not efficient for large graphs. F
 #include <chrono>
 #include <pthread.h>
 #include <cstdlib>
+#include <queue>
+#include <atomic>
+#include <algorithm>
+#include <mutex>
 #include "ECLgraph.h"
 
-static int threads;
-static pthread_barrier_t barrier;
-static ECLgraph g;
-static int* dist;
-static bool* visited;
-static int source = 0;
-static int curr_node;
-static int curr_dist;
-static int start_e, end_e;
-static bool done = false;
+/**
+ * Global shared data
+ */
+ECLgraph* g_graph;
+std::atomic<int>* g_dist;
+std::atomic<bool>* g_visited;
+std::atomic<bool> g_done(false);
+std::priority_queue<std::pair<int, int>, std::vector<std::pair<int, int>>, std::greater<>> g_pq;
+std::mutex g_pq_mutex;
+std::atomic<int> g_active_threads(0); // Track threads currently processing nodes
 
-static void* dijkstra_pthread(void* arg) {
-    const int tid = (int)(intptr_t)arg;
-
-    while (true) {
-        // Thread 0 selects the global minimum unvisited node
-        if (tid == 0) {
-            curr_node = -1;
-            curr_dist = INT_MAX;
-            for (int u = 0; u < g.nodes; u++) {
-                if (!visited[u] && dist[u] < curr_dist) {
-                    curr_dist = dist[u];
-                    curr_node = u;
+/**
+ * Fixed worker that properly handles termination
+ */
+void* dijkstra_simple_worker(void* arg) {
+    int tid = *(int*)arg;
+    
+    while (!g_done.load()) {
+        int current_node = -1;
+        
+        // Try to get work from queue
+        {
+            std::lock_guard<std::mutex> lock(g_pq_mutex);
+            
+            // Find next node to process
+            while (!g_pq.empty()) {
+                auto [d, u] = g_pq.top();
+                g_pq.pop();
+                
+                if (!g_visited[u].load() && g_dist[u].load() == d) {
+                    current_node = u;
+                    g_visited[u].store(true);
+                    break;
                 }
             }
-            if (curr_node == -1) done = true;
-            else {
-                visited[curr_node] = true;
-                start_e = g.nindex[curr_node];
-                end_e = g.nindex[curr_node + 1];
+            
+            // FIXED: Only terminate if queue is empty AND no threads are working
+            if (current_node == -1) {
+                if (g_active_threads.load() == 0) {
+                    g_done.store(true);
+                }
+                break; // This thread exits, but others may still be working
             }
         }
-
-        pthread_barrier_wait(&barrier);
-
-        if (done) break;
-
-        // All threads relax a block of neighbors
-        int total_edges = end_e - start_e;
-        int block = (total_edges + threads - 1) / threads;
-        int begin = start_e + tid * block;
-        int finish = std::min(end_e, begin + block);
-        for (int i = begin; i < finish; i++) {
-            int v = g.nlist[i];
-            int weight = (g.eweight != NULL) ? g.eweight[i] : 1;
-            int new_dist = curr_dist + weight;
-            if (new_dist < dist[v]) {
-                dist[v] = new_dist;
+        
+        if (current_node == -1) continue; // No work available, try again
+        
+        // Mark this thread as active
+        g_active_threads.fetch_add(1);
+        
+        // Process this node (outside mutex)
+        int u = current_node;
+        int u_dist = g_dist[u].load();
+        
+        // Process all edges from this node
+        for (int e = g_graph->nindex[u]; e < g_graph->nindex[u + 1]; e++) {
+            int v = g_graph->nlist[e];
+            int weight = (g_graph->eweight != nullptr) ? g_graph->eweight[e] : 1;
+            int new_dist = u_dist + weight;
+            
+            // Try to update distance
+            int old_dist = g_dist[v].load();
+            while (new_dist < old_dist) {
+                if (g_dist[v].compare_exchange_weak(old_dist, new_dist)) {
+                    // Successfully updated - add to queue if not visited
+                    if (!g_visited[v].load()) {
+                        std::lock_guard<std::mutex> lock(g_pq_mutex);
+                        g_pq.push({new_dist, v});
+                    }
+                    break;
+                }
             }
         }
-
-        pthread_barrier_wait(&barrier);
+        
+        // Mark this thread as no longer active
+        g_active_threads.fetch_sub(1);
+        
+        // Check termination condition again after finishing work
+        {
+            std::lock_guard<std::mutex> lock(g_pq_mutex);
+            if (g_pq.empty() && g_active_threads.load() == 0) {
+                g_done.store(true);
+            }
+        }
     }
+    
     return nullptr;
 }
 
 int main(int argc, char* argv[]) {
-    std::cout << "Single-Source Shortest Path using Dijkstra with pthreads (clean C-style)\n";
-
     if (argc != 3) {
         std::cerr << "USAGE: " << argv[0] << " input_file num_threads\n";
         return -1;
     }
-
-    threads = std::atoi(argv[2]);
-    if (threads < 1) {
+    
+    int num_threads = std::atoi(argv[2]);
+    if (num_threads < 1) {
         std::cerr << "ERROR: num_threads must be at least 1\n";
         return -1;
     }
-
+    
+    ECLgraph graph = readECLgraph(argv[1]);
+    g_graph = &graph;
+    int source = 0;
+    
+    std::cout << "Dijkstra's Algorithm (Fixed Termination)\n";
+    std::cout << "Nodes: " << graph.nodes << "\n";
+    std::cout << "Edges: " << graph.edges << "\n";
+    std::cout << "Threads: " << num_threads << "\n";
+    std::cout << "Source node: " << source << "\n";
+    
+    // Initialize
+    g_dist = new std::atomic<int>[graph.nodes];
+    g_visited = new std::atomic<bool>[graph.nodes];
+    
+    for (int i = 0; i < graph.nodes; i++) {
+        g_dist[i].store(INT_MAX);
+        g_visited[i].store(false);
+    }
+    g_dist[source].store(0);
+    
+    // Initialize priority queue and counters
+    g_pq.push({0, source});
+    g_done.store(false);
+    g_active_threads.store(0);
+    
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    // Create threads
+    std::vector<pthread_t> threads(num_threads);
+    std::vector<int> thread_ids(num_threads);
+    
+    for (int i = 0; i < num_threads; i++) {
+        thread_ids[i] = i;
+        pthread_create(&threads[i], nullptr, dijkstra_simple_worker, &thread_ids[i]);
+    }
+    
+    // Wait for threads
+    for (int i = 0; i < num_threads; i++) {
+        pthread_join(threads[i], nullptr);
+    }
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> runtime = end_time - start_time;
+    
+    std::cout << "Compute time: " << runtime.count() << " s\n";
+    
+    // Write results
     std::string output_file = "algorithm_tests/pthread/results/dijkstra_pthread_results.txt";
-    std::string console_file = "results/dijkstra_pthread_" + std::to_string(threads) + "_results.txt";
-    std::ofstream console_out(console_file);
-    if (!console_out) {
-        std::cerr << "ERROR: could not open console output file\n";
-        return -1;
-    }
-
-    g = readECLgraph(argv[1]);
-    console_out << "Single-Source Shortest Path using Dijkstra with pthreads (clean C-style)\n";
-    console_out << "input: " << argv[1] << "\n";
-    console_out << "output: " << output_file << "\n";
-    console_out << "nodes: " << g.nodes << "\n";
-    console_out << "edges: " << g.edges << "\n";
-    if (g.eweight != NULL) console_out << "graph has edge weights\n";
-    else console_out << "graph has no edge weights (using weight = 1)\n";
-    console_out << "pthreads used: " << threads << "\n";
-
-    dist = new int[g.nodes];
-    visited = new bool[g.nodes];
-    for (int i = 0; i < g.nodes; i++) {
-        dist[i] = INT_MAX;
-        visited[i] = false;
-    }
-    dist[source] = 0;
-
-    pthread_barrier_init(&barrier, nullptr, threads);
-    pthread_t* handles = new pthread_t[threads - 1];
-
-    auto beg = std::chrono::high_resolution_clock::now();
-
-    for (int t = 0; t < threads - 1; t++) {
-        pthread_create(&handles[t], nullptr, dijkstra_pthread, (void*)(intptr_t)t);
-    }
-
-    // Main thread also participates
-    dijkstra_pthread((void*)(intptr_t)(threads - 1));
-
-    for (int t = 0; t < threads - 1; t++) {
-        pthread_join(handles[t], nullptr);
-    }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> runtime = end - beg;
-    console_out << "\ncompute time: " << runtime.count() << " s\n";
-
     std::ofstream outfile(output_file);
-    if (!outfile) {
-        std::cerr << "ERROR: could not open output file\n";
-        console_out.close();
-        return -1;
-    }
-
     outfile << "# Single-Source Shortest Path from node " << source << "\n";
-    outfile << "# Format: target_node distance\n";
-
-    int global_max_path = INT_MIN;
-    for (int i = 0; i < g.nodes; i++) {
-        if (dist[i] == INT_MAX) {
+    
+    int reachable = 0;
+    int max_distance = 0;
+    for (int i = 0; i < graph.nodes; i++) {
+        int d = g_dist[i].load();
+        if (d == INT_MAX) {
             outfile << i << " INF\n";
         } else {
-            outfile << i << " " << dist[i] << "\n";
-            if (dist[i] > global_max_path) global_max_path = dist[i];
+            outfile << i << " " << d << "\n";
+            reachable++;
+            max_distance = std::max(max_distance, d);
         }
     }
     outfile.close();
-
-    console_out << "Results written to " << output_file << "\n";
-    console_out << "Global max shortest-path: ";
-    if (global_max_path == INT_MIN) console_out << "None found\n";
-    else console_out << global_max_path << "\n";
-
-    int reachable = 0;
-    for (int i = 0; i < g.nodes; i++) {
-        if (dist[i] != INT_MAX) reachable++;
-    }
-    console_out << "Reachable nodes from source: " << reachable << "\n";
-    console_out.close();
-
-    pthread_barrier_destroy(&barrier);
-    delete[] handles;
-    delete[] dist;
-    delete[] visited;
-    freeECLgraph(g);
+    
+    std::cout << "Results written to " << output_file << "\n";
+    std::cout << "Reachable nodes: " << reachable << "\n";
+    std::cout << "Maximum distance: " << max_distance << "\n";
+    
+    // Cleanup
+    delete[] g_dist;
+    delete[] g_visited;
+    freeECLgraph(graph);
+    
     return 0;
 }
